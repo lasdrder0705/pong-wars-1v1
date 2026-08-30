@@ -6,6 +6,7 @@
   <title>Pong Wars 1v1 - 昼夜领地对决</title>
   <meta name="description" content="基于经典 Pong Wars 演化的 1v1 实时领地争夺竞技游戏。支持局域网联机对战、双人同屏对战、智能 AI 挑战与原版禅意观战模式。" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%23FFC801'/><path d='M12 2a10 10 0 0 0 0 20 5 5 0 0 0 0-10 5 5 0 0 1 0-10z' fill='%23114C5A'/></svg>" />
   <!-- WebRTC P2P Signaling Broker -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
@@ -46,7 +47,7 @@
 
   <!-- Side Assignment Announcement Banner -->
   <div id="sideAnnouncement" class="side-announcement">
-    <span id="sideAnnouncementText">⚔️ 对决开始！你是【☀️ 昼方 · 左侧挡板】</span>
+    <span id="sideAnnouncementText">对决开始！你是【昼方 · 左侧挡板】</span>
   </div>
 
   <!-- Main Game Wrapper -->
@@ -292,7 +293,8 @@
         <h2 class="modal-title">局域网 / 跨设备对战</h2>
         <button class="close-modal-btn" id="closeLanModalBtn">&times;</button>
       </div>
-      <p class="modal-sub">支持手机与电脑同一局域网（或外网）直接对战，开局阵营随机分配！</p>
+      <p class="modal-sub">同一 Wi-Fi 下用房间码秒连。开局随机昼方（左）或夜方（右），并在屏幕上标明你控制哪一侧。</p>
+      <p id="lanHint" class="lan-status-msg">正在检测局域网地址…</p>
 
       <div class="lan-options-grid">
         <div class="lan-card">
@@ -315,7 +317,7 @@
           <h4>加入房间 (Join)</h4>
           <p>输入房主的 4 位房间码加入对战</p>
           <div style="display: flex; gap: 8px; margin-top: 10px;">
-            <input type="text" id="joinCodeInput" maxlength="4" placeholder="4位房间码" class="code-input" />
+            <input type="text" id="joinCodeInput" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="4位房间码" class="code-input" />
             <button class="btn-primary" id="joinRoomBtn">加入</button>
           </div>
         </div>
@@ -332,20 +334,20 @@
         <h2 class="modal-title">玩法与机制说明</h2>
         <button class="close-modal-btn" id="closeHelpModalIconBtn">&times;</button>
       </div>
-      <p class="modal-sub">支持手机端平滑拖拽触控；局域网联机开局自动随机分配阵营并提示【你是哪一方】！</p>
+      <p class="modal-sub">手机可单指拖拽挡板；联机开局随机分配阵营，并用横幅、YOU 标记告诉你自己在哪一侧。</p>
 
       <div class="guide-section">
         <h4 class="guide-title">控制与操作方式</h4>
         <div class="guide-row">
-          <span>📱 手机 / 平板触控</span>
-          <span>在屏幕任意位置<strong>单指上下拖动</strong>直接控制挡板</span>
+          <span>手机 / 平板</span>
+          <span>在棋盘上<strong>单指上下拖动</strong>控制己方挡板</span>
         </div>
         <div class="guide-row">
-          <span>💻 电脑键盘 (P1 昼方)</span>
+          <span>键盘 · 昼方（左）</span>
           <span><span class="key-badge">W</span>/<span class="key-badge">S</span> 移动，<span class="key-badge">E</span> 耀斑，<span class="key-badge">Space</span> 激光</span>
         </div>
         <div class="guide-row">
-          <span>💻 电脑键盘 (P2 夜方)</span>
+          <span>键盘 · 夜方（右）</span>
           <span><span class="key-badge">↑</span>/<span class="key-badge">↓</span> 移动，<span class="key-badge">Shift</span> 月蚀，<span class="key-badge">Enter</span> 激光</span>
         </div>
       </div>
