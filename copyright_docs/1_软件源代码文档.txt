@@ -1,0 +1,2411 @@
+/* 软件名称：基于网格碰撞与领地争夺的双人实时对战游戏软件 V1.0 */
+
+// ==================== File: js/game.js ====================
+/**
+ * Main Game State and Controller for Pong Wars 1v1
+ */
+
+const THEMES = {
+  classic: {
+    name: '经典昼夜 (Day & Night)',
+    dayColor: '#D9E8E3',
+    dayBall: '#141414', // Obsidian Black
+    dayAccent: '#2A9D8F',
+    nightColor: '#114C5A',
+    nightBall: '#FFFFFF', // Pure Crystal White
+    nightAccent: '#E76F51',
+    bg: 'linear-gradient(135deg, #172B36 0%, #0F1D24 100%)'
+  },
+  cyberpunk: {
+    name: '赛博霓虹 (Cyberpunk)',
+    dayColor: '#00F0FF',
+    dayBall: '#141414',
+    dayAccent: '#00F0FF',
+    nightColor: '#1A0B2E',
+    nightBall: '#FFFFFF',
+    nightAccent: '#FF007F',
+    bg: 'linear-gradient(135deg, #090214 0%, #1a0826 100%)'
+  },
+  elemental: {
+    name: '冰火交锋 (Fire & Ice)',
+    dayColor: '#FFE5B4',
+    dayBall: '#141414',
+    dayAccent: '#F77F00',
+    nightColor: '#1D3557',
+    nightBall: '#FFFFFF',
+    nightAccent: '#A8DADC',
+    bg: 'linear-gradient(135deg, #0b1726 0%, #201115 100%)'
+  },
+  void: {
+    name: '曜金虚空 (Solar & Void)',
+    dayColor: '#FFF3B0',
+    dayBall: '#141414',
+    dayAccent: '#FFD700',
+    nightColor: '#331832',
+    nightBall: '#FFFFFF',
+    nightAccent: '#9E2A2B',
+    bg: 'linear-gradient(135deg, #180c18 0%, #29121a 100%)'
+  },
+  monochrome: {
+    name: '极简黑白 (Monochrome)',
+    dayColor: '#F5F5F7',
+    dayBall: '#141414',
+    dayAccent: '#86868B',
+    nightColor: '#1D1D1F',
+    nightBall: '#FFFFFF',
+    nightAccent: '#E5E5EA',
+    bg: 'linear-gradient(135deg, #111112 0%, #222225 100%)'
+  }
+};
+
+const BASE_BALL_SPEED = 8.0;
+
+class PongWarsGame {
+  constructor(canvas, options = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    
+    this.width = canvas.width;
+    this.height = canvas.height;
+
+    this.squareSize = options.squareSize || 25;
+    this.gridX = Math.floor(this.width / this.squareSize);
+    this.gridY = Math.floor(this.height / this.squareSize);
+
+    this.sound = new SoundEngine();
+    this.particles = new ParticleSystem();
+    this.physics = new PhysicsEngine(this.gridX, this.gridY, this.squareSize);
+    this.ai = new AIController('medium');
+
+    this.currentThemeKey = options.theme || 'classic';
+    this.theme = THEMES[this.currentThemeKey];
+    this.mode = options.mode || 'pve';
+    this.state = 'idle';
+    
+    this.timeLimit = options.timeLimit || 90;
+    this.timeLeft = this.timeLimit;
+    this.elapsedSeconds = 0;
+    this.timerAcc = 0;
+
+    // Normal Skill 5-second Cooldowns
+    this.p1SkillCD = 0;
+    this.p2SkillCD = 0;
+
+    // Territory Scores
+    this.dayScore = 0;
+    this.nightScore = 0;
+    this.totalSquares = this.gridX * this.gridY;
+    this.dayCombo = 0;
+    this.nightCombo = 0;
+
+    this.squares = [];
+    this.stoneGrid = [];
+    this.leftPaddle = this.createPaddle(30, true);
+    this.rightPaddle = this.createPaddle(this.width - 30, false);
+    this.balls = [];
+    this.powerups = [];
+    this.powerupSpawnTimer = 0;
+    this.keys = {};
+    this.simSpeed = 1.0;
+  }
+
+  createPaddle(x, isLeft) {
+    return {
+      x: x,
+      y: this.height / 2,
+      width: 14,
+      height: 90,
+      speed: 7.5,
+      vy: 0,
+      energy: 0,
+      frozenTimer: 0,
+      isLeft: isLeft
+    };
+  }
+
+  setTheme(themeKey) {
+    if (THEMES[themeKey]) {
+      this.currentThemeKey = themeKey;
+      const oldTheme = this.theme;
+      this.theme = THEMES[themeKey];
+
+      for (let i = 0; i < this.gridX; i++) {
+        for (let j = 0; j < this.gridY; j++) {
+          if (this.squares[i] && this.squares[i][j] === oldTheme.dayColor) {
+            this.squares[i][j] = this.theme.dayColor;
+          } else if (this.squares[i] && this.squares[i][j] === oldTheme.nightColor) {
+            this.squares[i][j] = this.theme.nightColor;
+          }
+        }
+      }
+
+      this.balls.forEach(b => {
+        if (b.team === 'day') {
+          b.reverseColor = this.theme.dayColor;
+          b.ballColor = '#141414';
+        } else {
+          b.reverseColor = this.theme.nightColor;
+          b.ballColor = '#FFFFFF';
+        }
+      });
+    }
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    this.reset();
+  }
+
+  setAIDifficulty(diff) {
+    this.ai.setDifficulty(diff);
+  }
+
+  reset() {
+    this.squares = this.physics.createGrid(this.theme.dayColor, this.theme.nightColor);
+    this.stoneGrid = this.physics.createStoneGrid();
+    this.particles.clear();
+    this.powerups = [];
+    this.powerupSpawnTimer = 0;
+    this.timeLeft = this.timeLimit;
+    this.elapsedSeconds = 0;
+    this.timerAcc = 0;
+    this.p1SkillCD = 0;
+    this.p2SkillCD = 0;
+    this.dayCombo = 0;
+    this.nightCombo = 0;
+
+    this.leftPaddle = this.createPaddle(30, true);
+    this.rightPaddle = this.createPaddle(this.width - 30, false);
+
+    const initialSpeed = BASE_BALL_SPEED * 0.5;
+
+    this.balls = [
+      {
+        x: this.width / 4,
+        y: this.height / 2,
+        dx: initialSpeed,
+        dy: -initialSpeed,
+        team: 'day',
+        reverseColor: this.theme.dayColor,
+        ballColor: '#141414',
+        radius: this.squareSize / 2,
+        penetrationCapacity: 1,
+        remainingPenetration: 1
+      },
+      {
+        x: (this.width / 4) * 3,
+        y: this.height / 2,
+        dx: -initialSpeed,
+        dy: initialSpeed,
+        team: 'night',
+        reverseColor: this.theme.nightColor,
+        ballColor: '#FFFFFF',
+        radius: this.squareSize / 2,
+        penetrationCapacity: 1,
+        remainingPenetration: 1
+      }
+    ];
+
+    this.calculateTerritory();
+    this.state = 'idle';
+  }
+
+  start() {
+    this.sound.init();
+    this.reset();
+    this.state = 'running';
+  }
+
+  pause() {
+    if (this.state === 'running') this.state = 'paused';
+    else if (this.state === 'paused') this.state = 'running';
+  }
+
+  calculateTerritory() {
+    let day = 0;
+    let night = 0;
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] === this.theme.dayColor) day++;
+        else if (this.squares[i][j] === this.theme.nightColor) night++;
+      }
+    }
+    this.dayScore = day;
+    this.nightScore = night;
+  }
+
+  // Normal Skill: Solar Flare
+  activateSolarFlare() {
+    if (this.p1SkillCD > 0) return;
+    this.p1SkillCD = 5000;
+
+    const enemyTiles = [];
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] === this.theme.nightColor) {
+          enemyTiles.push({ i, j });
+        }
+      }
+    }
+
+    if (enemyTiles.length === 0) return;
+    const target = enemyTiles[Math.floor(Math.random() * enemyTiles.length)];
+
+    this.sound.playSkill('solar');
+    this.particles.shake(10, 5);
+
+    const radius = 1.5;
+    for (let i = target.i - 2; i <= target.i + 2; i++) {
+      for (let j = target.j - 2; j <= target.j + 2; j++) {
+        if (i >= 0 && i < this.gridX && j >= 0 && j < this.gridY) {
+          const dist = Math.hypot(i - target.i, j - target.j);
+          if (dist <= radius) {
+            this.squares[i][j] = this.theme.dayColor;
+            if (this.stoneGrid[i][j]) this.stoneGrid[i][j] = null;
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              this.theme.dayColor,
+              4
+            );
+          }
+        }
+      }
+    }
+
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#FFD700', 65);
+    this.calculateTerritory();
+  }
+
+  // Normal Skill: Eclipse
+  activateEclipse() {
+    if (this.p2SkillCD > 0) return;
+    this.p2SkillCD = 5000;
+
+    const enemyTiles = [];
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] === this.theme.dayColor) {
+          enemyTiles.push({ i, j });
+        }
+      }
+    }
+
+    if (enemyTiles.length === 0) return;
+    const target = enemyTiles[Math.floor(Math.random() * enemyTiles.length)];
+
+    this.sound.playSkill('eclipse');
+    this.particles.shake(10, 5);
+
+    const radius = 1.5;
+    for (let i = target.i - 2; i <= target.i + 2; i++) {
+      for (let j = target.j - 2; j <= target.j + 2; j++) {
+        if (i >= 0 && i < this.gridX && j >= 0 && j < this.gridY) {
+          const dist = Math.hypot(i - target.i, j - target.j);
+          if (dist <= radius) {
+            this.squares[i][j] = this.theme.nightColor;
+            if (this.stoneGrid[i][j]) this.stoneGrid[i][j] = null;
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              this.theme.nightColor,
+              4
+            );
+          }
+        }
+      }
+    }
+
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#7000FF', 65);
+    this.calculateTerritory();
+  }
+
+  // Ultimate Skill: 3-Row Laser Beam with Paddle Shielding & Energy Absorption
+  activateLaser(isLeft = true) {
+    const caster = isLeft ? this.leftPaddle : this.rightPaddle;
+    const defender = isLeft ? this.rightPaddle : this.leftPaddle;
+    if (caster.energy < 100) return;
+
+    caster.energy = 0;
+    const targetColor = isLeft ? this.theme.dayColor : this.theme.nightColor;
+    const beamColor = isLeft ? (this.theme.dayAccent || '#FFD700') : (this.theme.nightAccent || '#7000FF');
+
+    let centerRow = Math.floor(caster.y / this.squareSize);
+    centerRow = Math.max(1, Math.min(this.gridY - 2, centerRow));
+    const beamRows = [centerRow - 1, centerRow, centerRow + 1];
+
+    const laserY = centerRow * this.squareSize + this.squareSize / 2;
+    const laserTopY = (centerRow - 1) * this.squareSize;
+    const laserBottomY = (centerRow + 2) * this.squareSize;
+
+    const startX = isLeft ? caster.x + caster.width / 2 : caster.x - caster.width / 2;
+
+    // Check if the defender paddle intercepts/blocks the laser
+    const defTopY = defender.y - defender.height / 2;
+    const defBottomY = defender.y + defender.height / 2;
+    const isBlocked = (this.mode !== 'sim') && (Math.max(laserTopY, defTopY) < Math.min(laserBottomY, defBottomY));
+
+    let targetX = isLeft ? this.width : 0;
+    const defenderCol = Math.floor(defender.x / this.squareSize);
+
+    if (isBlocked) {
+      targetX = isLeft ? (defender.x - defender.width / 2) : (defender.x + defender.width / 2);
+      
+      // Defender absorbs energy (+30%)
+      defender.energy = Math.min(100, defender.energy + 30.0);
+
+      // Sound & VFX
+      this.sound.playShieldAbsorb();
+      this.particles.shake(14, 6);
+      this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#7000FF') : (this.theme.dayAccent || '#FFD700'), 25);
+    } else {
+      this.sound.playLaser(isLeft);
+      this.particles.shake(18, 8);
+    }
+
+    this.particles.addLaserBeam(startX, targetX, laserY, this.squareSize * 3, beamColor, 18);
+
+    // Convert blocks, protecting any blocks behind the defending paddle
+    beamRows.forEach(r => {
+      if (r >= 0 && r < this.gridY) {
+        for (let i = 0; i < this.gridX; i++) {
+          if (isBlocked) {
+            if (isLeft && i >= defenderCol) continue;
+            if (!isLeft && i <= defenderCol) continue;
+          }
+
+          this.squares[i][r] = targetColor;
+          if (this.stoneGrid[i][r]) this.stoneGrid[i][r] = null;
+          if (i % 2 === 0) {
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              r * this.squareSize + this.squareSize / 2,
+              targetColor,
+              2
+            );
+          }
+        }
+      }
+    });
+
+    this.calculateTerritory();
+  }
+
+  spawnRandomPowerup() {
+    if (this.powerups.length >= 2) return;
+    const types = ['bomb', 'multiball', 'freeze', 'speed', 'petrify'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const gx = Math.floor(Math.random() * (this.gridX - 4)) + 2;
+    const gy = Math.floor(Math.random() * (this.gridY - 4)) + 2;
+
+    this.powerups.push({
+      type: type,
+      x: gx * this.squareSize + this.squareSize / 2,
+      y: gy * this.squareSize + this.squareSize / 2,
+      radius: 11,
+      timer: 600
+    });
+  }
+
+  applyPowerup(powerup, ball) {
+    const isDay = ball.team === 'day';
+    const enemyPaddle = isDay ? this.rightPaddle : this.leftPaddle;
+
+    if (powerup.type === 'petrify') {
+      this.sound.playSkill('petrify');
+      this.particles.shake(12, 5);
+
+      const enemyColor = isDay ? this.theme.nightColor : this.theme.dayColor;
+      const enemyTiles = [];
+      for (let i = 0; i < this.gridX; i++) {
+        for (let j = 0; j < this.gridY; j++) {
+          if (this.squares[i][j] === enemyColor) {
+            enemyTiles.push({ i, j });
+          }
+        }
+      }
+
+      const count = Math.min(5, enemyTiles.length);
+      for (let k = 0; k < count; k++) {
+        const randIdx = Math.floor(Math.random() * enemyTiles.length);
+        const pick = enemyTiles.splice(randIdx, 1)[0];
+        if (pick) {
+          this.squares[pick.i][pick.j] = ball.reverseColor;
+          this.stoneGrid[pick.i][pick.j] = { hp: 2, maxHp: 2, owner: ball.team };
+          this.particles.addStoneDebris(
+            pick.i * this.squareSize + this.squareSize / 2,
+            pick.j * this.squareSize + this.squareSize / 2,
+            false
+          );
+        }
+      }
+    } else if (powerup.type === 'bomb') {
+      this.sound.playSkill('generic');
+      this.sound.playExplosion();
+      this.particles.shake(12, 6);
+      const centerI = Math.floor(powerup.x / this.squareSize);
+      const centerJ = Math.floor(powerup.y / this.squareSize);
+      for (let i = centerI - 2; i <= centerI + 2; i++) {
+        for (let j = centerJ - 2; j <= centerJ + 2; j++) {
+          if (i >= 0 && i < this.gridX && j >= 0 && j < this.gridY) {
+            this.squares[i][j] = ball.reverseColor;
+            if (this.stoneGrid[i][j]) this.stoneGrid[i][j] = null;
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              ball.reverseColor,
+              3
+            );
+          }
+        }
+      }
+      this.particles.addShockwave(powerup.x, powerup.y, ball.reverseColor, 70);
+    } else if (powerup.type === 'multiball') {
+      this.sound.playSkill('generic');
+      for (let k = -1; k <= 1; k += 2) {
+        this.balls.push({
+          x: ball.x,
+          y: ball.y,
+          dx: ball.dx * 0.9 + k * 1.2,
+          dy: ball.dy * 0.9 - k * 1.2,
+          team: ball.team,
+          reverseColor: ball.reverseColor,
+          ballColor: ball.ballColor,
+          radius: this.squareSize / 2,
+          penetrationCapacity: ball.penetrationCapacity,
+          remainingPenetration: 1,
+          isExtra: true,
+          lifetime: 500
+        });
+      }
+    } else if (powerup.type === 'freeze') {
+      this.sound.playSkill('generic');
+      enemyPaddle.frozenTimer = 150;
+    } else if (powerup.type === 'speed') {
+      this.sound.playSkill('generic');
+      ball.penetrationCapacity = Math.min(3, ball.penetrationCapacity + 1);
+      ball.remainingPenetration = ball.penetrationCapacity;
+    }
+
+    this.calculateTerritory();
+  }
+
+  handleInput() {
+    if (this.mode === 'sim') return;
+
+    // P1 Controls
+    const p1Speed = this.leftPaddle.frozenTimer > 0 ? this.leftPaddle.speed * 0.45 : this.leftPaddle.speed;
+    this.leftPaddle.vy = 0;
+    if (this.keys['KeyW'] || this.keys['w'] || this.keys['W']) {
+      this.leftPaddle.y -= p1Speed;
+      this.leftPaddle.vy = -p1Speed;
+    }
+    if (this.keys['KeyS'] || this.keys['s'] || this.keys['S']) {
+      this.leftPaddle.y += p1Speed;
+      this.leftPaddle.vy = p1Speed;
+    }
+    if (this.keys['KeyE'] || this.keys['e'] || this.keys['E']) {
+      this.activateSolarFlare();
+    }
+    if (this.keys['Space'] || this.keys[' ']) {
+      this.activateLaser(true);
+    }
+
+    // P2 Controls
+    if (this.mode === 'pvp') {
+      const p2Speed = this.rightPaddle.frozenTimer > 0 ? this.rightPaddle.speed * 0.45 : this.rightPaddle.speed;
+      this.rightPaddle.vy = 0;
+      if (this.keys['ArrowUp']) {
+        this.rightPaddle.y -= p2Speed;
+        this.rightPaddle.vy = -p2Speed;
+      }
+      if (this.keys['ArrowDown']) {
+        this.rightPaddle.y += p2Speed;
+        this.rightPaddle.vy = p2Speed;
+      }
+      if (this.keys['ShiftRight'] || this.keys['Slash']) {
+        this.activateEclipse();
+      }
+      if (this.keys['Enter'] || this.keys['NumpadEnter']) {
+        this.activateLaser(false);
+      }
+    }
+
+    this.leftPaddle.y = Math.max(this.leftPaddle.height / 2, Math.min(this.height - this.leftPaddle.height / 2, this.leftPaddle.y));
+    this.rightPaddle.y = Math.max(this.rightPaddle.height / 2, Math.min(this.height - this.rightPaddle.height / 2, this.rightPaddle.y));
+  }
+
+  update(delta) {
+    if (this.state !== 'running') return;
+
+    this.elapsedSeconds += delta / 1000;
+    if (this.timeLimit > 0) {
+      this.timerAcc += delta;
+      if (this.timerAcc >= 1000) {
+        this.timeLeft--;
+        this.timerAcc -= 1000;
+        if (this.timeLeft <= 0) {
+          this.endGame();
+          return;
+        }
+      }
+    }
+
+    if (this.p1SkillCD > 0) this.p1SkillCD = Math.max(0, this.p1SkillCD - delta);
+    if (this.p2SkillCD > 0) this.p2SkillCD = Math.max(0, this.p2SkillCD - delta);
+
+    if (this.dayScore === this.totalSquares || this.nightScore === this.totalSquares) {
+      this.endGame();
+      return;
+    }
+
+    const globalSpeedRatio = 0.5 + Math.min(1.0, this.elapsedSeconds / 75.0) * 1.0;
+    const globalTargetSpeed = BASE_BALL_SPEED * globalSpeedRatio;
+
+    this.handleInput();
+
+    if (this.mode === 'pve') {
+      this.ai.update(this.rightPaddle, this.balls, this.height, true, this);
+    }
+
+    [this.leftPaddle, this.rightPaddle].forEach(p => {
+      if (p.frozenTimer > 0) p.frozenTimer--;
+    });
+
+    this.powerupSpawnTimer++;
+    if (this.powerupSpawnTimer >= 450 && this.mode !== 'sim') {
+      this.powerupSpawnTimer = 0;
+      this.spawnRandomPowerup();
+    }
+
+    for (let i = this.powerups.length - 1; i >= 0; i--) {
+      const p = this.powerups[i];
+      p.timer--;
+      if (p.timer <= 0) this.powerups.splice(i, 1);
+    }
+
+    const steps = 3;
+    for (let s = 0; s < steps; s++) {
+      for (let bIdx = this.balls.length - 1; bIdx >= 0; bIdx--) {
+        const ball = this.balls[bIdx];
+
+        const currentBallSpeed = Math.hypot(ball.dx, ball.dy);
+        if (currentBallSpeed > 0.01 && currentBallSpeed < globalTargetSpeed) {
+          const speedFactor = Math.min(globalTargetSpeed, currentBallSpeed + 0.015) / currentBallSpeed;
+          ball.dx *= speedFactor;
+          ball.dy *= speedFactor;
+        }
+
+        const ballSpeedRatio = (Math.hypot(ball.dx, ball.dy) / BASE_BALL_SPEED);
+        ball.penetrationCapacity = ballSpeedRatio < 0.85 ? 1 : (ballSpeedRatio < 1.25 ? 2 : 3);
+
+        const stepDx = (ball.dx / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
+        const stepDy = (ball.dy / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
+
+        ball.x += stepDx;
+        ball.y += stepDy;
+
+        if (s === 0) {
+          this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.penetrationCapacity >= 3);
+        }
+
+        // Grid collision with stone fortification handling
+        this.physics.checkSquareCollision(
+          ball,
+          this.squares,
+          this.stoneGrid,
+          this.theme.dayColor,
+          this.theme.nightColor,
+          (i, j, b, oldColor) => {
+            const isDay = b.team === 'day';
+            const combo = isDay ? ++this.dayCombo : ++this.nightCombo;
+            this.sound.playBlockFlip(isDay, combo);
+
+            const paddle = isDay ? this.leftPaddle : this.rightPaddle;
+            paddle.energy = Math.min(100, paddle.energy + 0.8);
+
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              b.reverseColor,
+              4
+            );
+          },
+          (i, j, isDestroyed) => {
+            this.sound.playStoneHit(isDestroyed);
+            this.particles.shake(isDestroyed ? 8 : 4, isDestroyed ? 5 : 2.5);
+            this.particles.addStoneDebris(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              isDestroyed
+            );
+          }
+        );
+
+        // Wall boundary collision: Clean bounce, NO energy charge or loss!
+        this.physics.checkBoundaryCollision(ball, this.width, this.height, null);
+
+        // Paddle collision (Energy Siphon + Ball Slowdown)
+        if (this.mode !== 'sim') {
+          this.physics.checkPaddleCollision(ball, this.leftPaddle, this.rightPaddle, true, (paddle, enemyPaddle, b) => {
+            this.dayCombo = 0;
+            this.sound.playPaddleHit(false);
+            this.particles.shake(6, 3);
+            this.particles.addShockwave(paddle.x, paddle.y, this.theme.dayColor, 35);
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#FFD700', 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+          });
+
+          this.physics.checkPaddleCollision(ball, this.rightPaddle, this.leftPaddle, false, (paddle, enemyPaddle, b) => {
+            this.nightCombo = 0;
+            this.sound.playPaddleHit(false);
+            this.particles.shake(6, 3);
+            this.particles.addShockwave(paddle.x, paddle.y, this.theme.nightColor, 35);
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#7000FF', 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+          });
+        }
+
+        for (let pIdx = this.powerups.length - 1; pIdx >= 0; pIdx--) {
+          const pu = this.powerups[pIdx];
+          const dist = Math.hypot(ball.x - pu.x, ball.y - pu.y);
+          if (dist < ball.radius + pu.radius) {
+            this.applyPowerup(pu, ball);
+            this.powerups.splice(pIdx, 1);
+          }
+        }
+
+        if (ball.isExtra) {
+          ball.lifetime--;
+          if (ball.lifetime <= 0) this.balls.splice(bIdx, 1);
+        }
+
+        this.physics.applyRandomness(ball, 3, 14);
+      }
+    }
+
+    this.calculateTerritory();
+    this.particles.update();
+  }
+
+  endGame() {
+    this.state = 'gameover';
+    const dayWon = this.dayScore >= this.nightScore;
+    this.sound.playVictory(dayWon);
+    this.particles.shake(20, 10);
+    this.particles.addShockwave(this.width / 2, this.height / 2, dayWon ? this.theme.dayColor : this.theme.nightColor, 200);
+  }
+
+  draw() {
+    this.ctx.save();
+    
+    if (this.particles.shakeDuration > 0) {
+      this.ctx.translate(this.particles.shakeOffsetX, this.particles.shakeOffsetY);
+    }
+
+    this.ctx.clearRect(0, 0, this.width, this.height);
+
+    // 1. Draw Grid Squares
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        this.ctx.fillStyle = this.squares[i][j];
+        this.ctx.fillRect(i * this.squareSize, j * this.squareSize, this.squareSize, this.squareSize);
+
+        const stone = this.stoneGrid[i] ? this.stoneGrid[i][j] : null;
+        if (stone) {
+          this.ctx.save();
+          this.ctx.strokeStyle = '#4A5568';
+          this.ctx.lineWidth = 2.5;
+          this.ctx.strokeRect(i * this.squareSize + 1.5, j * this.squareSize + 1.5, this.squareSize - 3, this.squareSize - 3);
+
+          this.ctx.fillStyle = '#4A5568';
+          this.ctx.beginPath();
+          this.ctx.arc(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2, 2.5, 0, Math.PI * 2);
+          this.ctx.fill();
+
+          if (stone.hp === 1) {
+            this.ctx.strokeStyle = '#E2E8F0';
+            this.ctx.lineWidth = 1.5;
+            this.ctx.beginPath();
+            this.ctx.moveTo(i * this.squareSize + 4, j * this.squareSize + 4);
+            this.ctx.lineTo(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2);
+            this.ctx.lineTo(i * this.squareSize + this.squareSize - 4, j * this.squareSize + this.squareSize - 4);
+            this.ctx.moveTo(i * this.squareSize + this.squareSize - 5, j * this.squareSize + 5);
+            this.ctx.lineTo(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2);
+            this.ctx.stroke();
+          }
+          this.ctx.restore();
+        }
+      }
+    }
+
+    // Grid lines
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
+    this.ctx.lineWidth = 1;
+    for (let i = 0; i <= this.gridX; i++) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(i * this.squareSize, 0);
+      this.ctx.lineTo(i * this.squareSize, this.height);
+      this.ctx.stroke();
+    }
+    for (let j = 0; j <= this.gridY; j++) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, j * this.squareSize);
+      this.ctx.lineTo(this.width, j * this.squareSize);
+      this.ctx.stroke();
+    }
+
+    // 2. Draw Vector Power-Ups
+    this.powerups.forEach(p => {
+      this.ctx.save();
+      this.ctx.translate(p.x, p.y);
+      const pulse = 1 + Math.sin(Date.now() / 150) * 0.12;
+      this.ctx.scale(pulse, pulse);
+
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+      this.ctx.fillStyle = 'rgba(15, 25, 35, 0.9)';
+      this.ctx.fill();
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeStyle = p.type === 'petrify' ? '#A0AEC0' : '#FFD700';
+      this.ctx.stroke();
+
+      this.ctx.strokeStyle = '#FFFFFF';
+      this.ctx.fillStyle = '#FFFFFF';
+      this.ctx.lineWidth = 1.5;
+
+      if (p.type === 'petrify') {
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, -6);
+        this.ctx.lineTo(5, -3);
+        this.ctx.lineTo(5, 2);
+        this.ctx.lineTo(0, 6);
+        this.ctx.lineTo(-5, 2);
+        this.ctx.lineTo(-5, -3);
+        this.ctx.closePath();
+        this.ctx.stroke();
+        this.ctx.fillStyle = '#A0AEC0';
+        this.ctx.fill();
+      } else if (p.type === 'bomb') {
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(-7, 0); this.ctx.lineTo(7, 0);
+        this.ctx.moveTo(0, -7); this.ctx.lineTo(0, 7);
+        this.ctx.stroke();
+      } else if (p.type === 'multiball') {
+        this.ctx.beginPath();
+        this.ctx.arc(-3.5, 2, 2, 0, Math.PI * 2);
+        this.ctx.arc(3.5, 2, 2, 0, Math.PI * 2);
+        this.ctx.arc(0, -3.5, 2, 0, Math.PI * 2);
+        this.ctx.fill();
+      } else if (p.type === 'freeze') {
+        for (let a = 0; a < 3; a++) {
+          this.ctx.save();
+          this.ctx.rotate(a * Math.PI / 3);
+          this.ctx.beginPath();
+          this.ctx.moveTo(-5, 0); this.ctx.lineTo(5, 0);
+          this.ctx.stroke();
+          this.ctx.restore();
+        }
+      } else if (p.type === 'speed') {
+        this.ctx.beginPath();
+        this.ctx.moveTo(-1, -5);
+        this.ctx.lineTo(3, -1);
+        this.ctx.lineTo(0, 0);
+        this.ctx.lineTo(2, 5);
+        this.ctx.lineTo(-3, 1);
+        this.ctx.lineTo(-0.5, 0);
+        this.ctx.closePath();
+        this.ctx.fill();
+      }
+
+      this.ctx.restore();
+    });
+
+    // 3. Draw Paddles
+    if (this.mode !== 'sim') {
+      [this.leftPaddle, this.rightPaddle].forEach(p => {
+        this.ctx.save();
+        
+        if (p.frozenTimer > 0) {
+          this.ctx.shadowColor = '#00E5FF';
+          this.ctx.shadowBlur = 12;
+        } else if (p.energy >= 100) {
+          this.ctx.shadowColor = '#FFC801';
+          this.ctx.shadowBlur = 18;
+        }
+
+        this.ctx.fillStyle = p.frozenTimer > 0 ? '#00E5FF' : (p.isLeft ? this.theme.dayBall : this.theme.nightBall);
+        
+        const rx = p.x - p.width / 2;
+        const ry = p.y - p.height / 2;
+        const radius = p.width / 2;
+
+        this.ctx.beginPath();
+        this.ctx.roundRect(rx, ry, p.width, p.height, radius);
+        this.ctx.fill();
+
+        // Laser Core when ready
+        if (p.energy >= 100) {
+          this.ctx.fillStyle = '#FFFFFF';
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+          this.ctx.fill();
+
+          this.ctx.strokeStyle = 'rgba(255, 200, 1, 0.25)';
+          this.ctx.setLineDash([4, 4]);
+          this.ctx.lineWidth = 1;
+          this.ctx.beginPath();
+          this.ctx.moveTo(p.x, p.y);
+          this.ctx.lineTo(p.isLeft ? this.width : 0, p.y);
+          this.ctx.stroke();
+          this.ctx.setLineDash([]);
+        }
+
+        this.ctx.restore();
+      });
+    }
+
+    // 4. Draw Lasers & Particles
+    this.particles.draw(this.ctx, this.width);
+
+    // 5. Draw Distinct Black & White Balls
+    this.balls.forEach(ball => {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+
+      const isDayBall = ball.team === 'day';
+      const actualBallColor = isDayBall ? '#141414' : '#FFFFFF';
+
+      if (ball.penetrationCapacity >= 3) {
+        this.ctx.shadowColor = isDayBall ? '#000000' : '#FFFFFF';
+        this.ctx.shadowBlur = 16;
+        this.ctx.strokeStyle = isDayBall ? '#4A5568' : '#00F0FF';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+      } else {
+        this.ctx.shadowColor = 'rgba(0,0,0,0.4)';
+        this.ctx.shadowBlur = 6;
+      }
+
+      this.ctx.fillStyle = actualBallColor;
+      this.ctx.fill();
+      this.ctx.closePath();
+
+      this.ctx.beginPath();
+      this.ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.25, 0, Math.PI * 2);
+      this.ctx.fillStyle = isDayBall ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)';
+      this.ctx.fill();
+
+      this.ctx.restore();
+    });
+
+    this.ctx.restore();
+  }
+}
+
+window.PongWarsGame = PongWarsGame;
+window.THEMES = THEMES;
+
+
+// ==================== File: js/physics.js ====================
+/**
+ * Physics and Collision Engine for Pong Wars 1v1
+ */
+class PhysicsEngine {
+  constructor(gridWidth, gridHeight, squareSize) {
+    this.numSquaresX = gridWidth;
+    this.numSquaresY = gridHeight;
+    this.squareSize = squareSize;
+  }
+
+  // Create initial grid (Day on left half, Night on right half)
+  createGrid(dayColor, nightColor) {
+    const squares = [];
+    for (let i = 0; i < this.numSquaresX; i++) {
+      squares[i] = [];
+      for (let j = 0; j < this.numSquaresY; j++) {
+        squares[i][j] = i < this.numSquaresX / 2 ? dayColor : nightColor;
+      }
+    }
+    return squares;
+  }
+
+  // Create empty stone fortification grid
+  createStoneGrid() {
+    const grid = [];
+    for (let i = 0; i < this.numSquaresX; i++) {
+      grid[i] = [];
+      for (let j = 0; j < this.numSquaresY; j++) {
+        grid[i][j] = null;
+      }
+    }
+    return grid;
+  }
+
+  // Check ball vs grid squares collision with stone fortification and penetration logic
+  checkSquareCollision(ball, squares, stoneGrid, dayColor, nightColor, onFlipBlock, onStoneHit) {
+    let flippedCount = 0;
+    const radius = this.squareSize / 2;
+    const checkAngles = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, (5 * Math.PI) / 4, (3 * Math.PI) / 2, (7 * Math.PI) / 4];
+
+    if (ball.remainingPenetration === undefined) {
+      ball.remainingPenetration = ball.penetrationCapacity || 1;
+    }
+
+    for (let angle of checkAngles) {
+      const checkX = ball.x + Math.cos(angle) * radius;
+      const checkY = ball.y + Math.sin(angle) * radius;
+
+      const i = Math.floor(checkX / this.squareSize);
+      const j = Math.floor(checkY / this.squareSize);
+
+      if (i >= 0 && i < this.numSquaresX && j >= 0 && j < this.numSquaresY) {
+        // If the square belongs to the enemy side
+        if (squares[i][j] !== ball.reverseColor) {
+          const oldColor = squares[i][j];
+          const stone = stoneGrid && stoneGrid[i] ? stoneGrid[i][j] : null;
+
+          // Case A: Enemy has petrified / fortified this block!
+          if (stone && stone.owner !== ball.team) {
+            // High speed mode (penetrationCapacity >= 3): 1-hit shatter stone but consume all penetration for this bounce
+            if (ball.penetrationCapacity >= 3) {
+              stoneGrid[i][j] = null;
+              squares[i][j] = ball.reverseColor;
+              flippedCount++;
+
+              if (onStoneHit) onStoneHit(i, j, true);
+              if (onFlipBlock) onFlipBlock(i, j, ball, oldColor);
+
+              // Consume full penetration: this hit only breaks 1 stone block and bounces immediately!
+              ball.remainingPenetration = 0;
+            } else {
+              // Low / Normal speed mode: Requires 2 hits to break
+              stone.hp -= 1;
+              if (stone.hp <= 0) {
+                // Stone shattered on second hit
+                stoneGrid[i][j] = null;
+                squares[i][j] = ball.reverseColor;
+                flippedCount++;
+
+                if (onStoneHit) onStoneHit(i, j, true);
+                if (onFlipBlock) onFlipBlock(i, j, ball, oldColor);
+              } else {
+                // Stone damaged / cracked (1 HP remaining), territory NOT flipped
+                if (onStoneHit) onStoneHit(i, j, false);
+              }
+              // Force bounce on stone impact
+              ball.remainingPenetration = 0;
+            }
+
+            // Perform bounce
+            if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
+              ball.dx = -ball.dx;
+            } else {
+              ball.dy = -ball.dy;
+            }
+            ball.remainingPenetration = ball.penetrationCapacity || 1;
+            break;
+          }
+
+          // Case B: Normal Square Hit
+          squares[i][j] = ball.reverseColor;
+          flippedCount++;
+
+          if (onFlipBlock) {
+            onFlipBlock(i, j, ball, oldColor);
+          }
+
+          ball.remainingPenetration--;
+
+          // Bounce if remaining penetration exhausted
+          if (ball.remainingPenetration <= 0) {
+            if (Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle))) {
+              ball.dx = -ball.dx;
+            } else {
+              ball.dy = -ball.dy;
+            }
+            ball.remainingPenetration = ball.penetrationCapacity || 1;
+            break;
+          }
+        }
+      }
+    }
+    return flippedCount;
+  }
+
+  // Boundary collision (Walls) - Walls strictly do NOT touch energy or trigger miss penalties
+  checkBoundaryCollision(ball, width, height) {
+    const radius = this.squareSize / 2;
+
+    if (ball.y - radius <= 0) {
+      ball.y = radius;
+      ball.dy = Math.abs(ball.dy);
+      ball.remainingPenetration = ball.penetrationCapacity || 1;
+    } else if (ball.y + radius >= height) {
+      ball.y = height - radius;
+      ball.dy = -Math.abs(ball.dy);
+      ball.remainingPenetration = ball.penetrationCapacity || 1;
+    }
+
+    if (ball.x - radius <= 0) {
+      ball.x = radius;
+      ball.dx = Math.abs(ball.dx);
+      ball.remainingPenetration = ball.penetrationCapacity || 1;
+    } else if (ball.x + radius >= width) {
+      ball.x = width - radius;
+      ball.dx = -Math.abs(ball.dx);
+      ball.remainingPenetration = ball.penetrationCapacity || 1;
+    }
+  }
+
+  // Paddle Collision Detection with Energy Siphon & Ball Slowdown
+  checkPaddleCollision(ball, paddle, enemyPaddle, isLeftPaddle, onHit) {
+    const radius = this.squareSize / 2;
+    const px = paddle.x;
+    const py = paddle.y;
+    const pw = paddle.width;
+    const ph = paddle.height;
+
+    const nearestX = Math.max(px - pw / 2, Math.min(ball.x, px + pw / 2));
+    const nearestY = Math.max(py - ph / 2, Math.min(ball.y, py + ph / 2));
+
+    const distX = ball.x - nearestX;
+    const distY = ball.y - nearestY;
+    const distSq = distX * distX + distY * distY;
+
+    if (distSq < radius * radius) {
+      // 1. Directional reposition
+      if (isLeftPaddle && ball.dx < 0) {
+        ball.dx = Math.abs(ball.dx);
+        ball.x = px + pw / 2 + radius + 1;
+      } else if (!isLeftPaddle && ball.dx > 0) {
+        ball.dx = -Math.abs(ball.dx);
+        ball.x = px - pw / 2 - radius - 1;
+      }
+
+      // 2. Deflection angle
+      const offset = (ball.y - py) / (ph / 2); // -1 to 1
+      const maxAngle = Math.PI / 3;
+      const angle = offset * maxAngle;
+
+      // 3. Energy Siphon & Slowdown Penalty:
+      // ONLY when intercepting the OPPONENT'S ball: drain opponent's energy, recharge self, and slow down the ball!
+      const isOpponentBall = (isLeftPaddle && ball.team === 'night') || (!isLeftPaddle && ball.team === 'day');
+
+      if (isOpponentBall) {
+        paddle.energy = Math.min(100, paddle.energy + 6.0);
+        if (enemyPaddle) {
+          enemyPaddle.energy = Math.max(0, enemyPaddle.energy - 4.0);
+        }
+
+        // Slow down ball speed by 25% (down to minimum 4.0)
+        const currentSpeed = Math.hypot(ball.dx, ball.dy);
+        const newSpeed = Math.max(4.0, currentSpeed * 0.75);
+
+        ball.dx = (isLeftPaddle ? 1 : -1) * Math.cos(angle) * newSpeed;
+        ball.dy = Math.sin(angle) * newSpeed + (paddle.vy || 0) * 0.2;
+
+        const speedRatio = newSpeed / 8.0;
+        ball.penetrationCapacity = speedRatio < 0.85 ? 1 : (speedRatio < 1.25 ? 2 : 3);
+        ball.remainingPenetration = ball.penetrationCapacity;
+      } else {
+        // Own ball: Normal deflect at current speed
+        const currentSpeed = Math.hypot(ball.dx, ball.dy);
+        ball.dx = (isLeftPaddle ? 1 : -1) * Math.cos(angle) * currentSpeed;
+        ball.dy = Math.sin(angle) * currentSpeed + (paddle.vy || 0) * 0.2;
+      }
+
+      if (onHit) onHit(paddle, enemyPaddle, ball, isOpponentBall);
+      return true;
+    }
+    return false;
+  }
+
+  // Small random perturbation
+  applyRandomness(ball, minSpeed = 3, maxSpeed = 14) {
+    ball.dx += (Math.random() * 0.03 - 0.015);
+    ball.dy += (Math.random() * 0.03 - 0.015);
+
+    const speed = Math.sqrt(ball.dx * ball.dx + ball.dy * ball.dy);
+    if (speed > maxSpeed) {
+      const factor = maxSpeed / speed;
+      ball.dx *= factor;
+      ball.dy *= factor;
+    } else if (speed < minSpeed) {
+      const factor = minSpeed / (speed || 1);
+      ball.dx *= factor;
+      ball.dy *= factor;
+    }
+
+    if (Math.abs(ball.dx) < 1.2) ball.dx = ball.dx >= 0 ? 1.5 : -1.5;
+    if (Math.abs(ball.dy) < 1.2) ball.dy = ball.dy >= 0 ? 1.5 : -1.5;
+  }
+}
+
+window.PhysicsEngine = PhysicsEngine;
+
+
+// ==================== File: js/particles.js ====================
+/**
+ * Particle and Visual Effects System for Pong Wars 1v1
+ * Pure visual particle effects without text clutter
+ */
+class ParticleSystem {
+  constructor() {
+    this.particles = [];
+    this.shockwaves = [];
+    this.lasers = [];
+    this.shields = [];
+    this.siphonBeads = [];
+    this.slowdownRings = [];
+    this.shakeDuration = 0;
+    this.shakeIntensity = 0;
+    this.shakeOffsetX = 0;
+    this.shakeOffsetY = 0;
+  }
+
+  // Trigger screen shake
+  shake(duration = 10, intensity = 6) {
+    this.shakeDuration = duration;
+    this.shakeIntensity = intensity;
+  }
+
+  // Add block conversion particles
+  addBlockSparks(x, y, color, count = 5) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * 2.8 + 1;
+      this.particles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: Math.random() * 3 + 2,
+        color: color,
+        alpha: 1,
+        decay: Math.random() * 0.03 + 0.025,
+        shape: 'square'
+      });
+    }
+  }
+
+  // Add Stone/Rock Debris when hitting petrified blocks
+  addStoneDebris(x, y, isDestroyed = false) {
+    const count = isDestroyed ? 14 : 7;
+    const stoneColors = ['#718096', '#4A5568', '#A0AEC0', '#E2E8F0'];
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = Math.random() * (isDestroyed ? 4.5 : 2.5) + 1;
+      this.particles.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: Math.random() * (isDestroyed ? 4 : 3) + 2,
+        color: stoneColors[Math.floor(Math.random() * stoneColors.length)],
+        alpha: 1,
+        decay: Math.random() * 0.04 + 0.03,
+        shape: 'square'
+      });
+    }
+  }
+
+  // Add distinct black/white ball trail
+  addBallTrail(x, y, ballColor, size, isHighSpeed = false) {
+    const isDarkBall = ballColor === '#141414' || ballColor === '#121212' || ballColor === '#1D1D1F' || ballColor === '#172B36' || ballColor === '#114C5A';
+    const trailColor = isDarkBall ? '#2D3748' : '#F7FAFC';
+
+    this.particles.push({
+      x: x + (Math.random() * 2.5 - 1.25),
+      y: y + (Math.random() * 2.5 - 1.25),
+      vx: (Math.random() - 0.5) * 0.35,
+      vy: (Math.random() - 0.5) * 0.35,
+      size: size * (isHighSpeed ? 0.75 : 0.5),
+      color: trailColor,
+      alpha: isHighSpeed ? 0.7 : 0.4,
+      decay: isHighSpeed ? 0.05 : 0.04,
+      shape: 'circle'
+    });
+  }
+
+  // Add shockwave ring
+  addShockwave(x, y, color, maxRadius = 80) {
+    this.shockwaves.push({
+      x: x,
+      y: y,
+      radius: 4,
+      maxRadius: maxRadius,
+      color: color,
+      alpha: 1,
+      lineWidth: 3.5,
+      growth: 4.5
+    });
+  }
+
+  // Add Energy Siphon Beaded Flow from ball to paddle
+  addEnergySiphon(fromX, fromY, toX, toY, color = '#00F0FF', count = 8) {
+    for (let i = 0; i < count; i++) {
+      this.siphonBeads.push({
+        x: fromX + (Math.random() - 0.5) * 10,
+        y: fromY + (Math.random() - 0.5) * 10,
+        targetX: toX,
+        targetY: toY,
+        progress: 0,
+        speed: 0.07 + Math.random() * 0.05,
+        color: color,
+        size: 3.5 + Math.random() * 2,
+        alpha: 1.0
+      });
+    }
+  }
+
+  // Add Ball Slowdown deceleration ripple ring
+  addSlowdownRing(x, y, color = '#00E5FF') {
+    this.slowdownRings.push({
+      x: x,
+      y: y,
+      radius: 6,
+      maxRadius: 28,
+      color: color,
+      alpha: 1.0
+    });
+  }
+
+  // Add Energy Shield Barrier on Paddle
+  addEnergyShield(x, y, height, color = '#00E5FF', duration = 24) {
+    this.shields.push({
+      x: x,
+      y: y,
+      height: height + 20,
+      color: color,
+      alpha: 1.0,
+      life: duration,
+      maxLife: duration
+    });
+  }
+
+  // Add High-Impact Laser Beam anchored to paddle
+  addLaserBeam(startX, targetX, yCenter, height, color, duration = 18) {
+    this.lasers.push({
+      startX: startX,
+      targetX: targetX,
+      y: yCenter,
+      height: height,
+      color: color,
+      alpha: 1.0,
+      life: duration,
+      maxLife: duration,
+      progress: 0.2
+    });
+
+    this.addWallSparks(targetX, yCenter, targetX > startX ? -1 : 1, color, 18);
+  }
+
+  // Laser Wall / Shield Impact Sparks
+  addWallSparks(x, y, dir, color, count = 15) {
+    for (let i = 0; i < count; i++) {
+      const angle = (dir > 0 ? 0 : Math.PI) + (Math.random() - 0.5) * 1.2;
+      const speed = Math.random() * 6 + 2;
+      this.particles.push({
+        x: x,
+        y: y + (Math.random() - 0.5) * 40,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: Math.random() * 4 + 2,
+        color: Math.random() > 0.4 ? '#FFFFFF' : color,
+        alpha: 1,
+        decay: Math.random() * 0.05 + 0.03,
+        shape: 'circle'
+      });
+    }
+  }
+
+  // No-op for floating text to keep codebase clean and free of visual text popups
+  addFloatingText(text, x, y, color = '#FFFFFF', size = 15) {
+    // Intentionally no-op to eliminate ugly text popups per user request
+  }
+
+  update() {
+    if (this.shakeDuration > 0) {
+      this.shakeOffsetX = (Math.random() - 0.5) * this.shakeIntensity * 2;
+      this.shakeOffsetY = (Math.random() - 0.5) * this.shakeIntensity * 2;
+      this.shakeDuration--;
+    } else {
+      this.shakeOffsetX = 0;
+      this.shakeOffsetY = 0;
+    }
+
+    // Energy Siphon Beads update
+    for (let i = this.siphonBeads.length - 1; i >= 0; i--) {
+      const b = this.siphonBeads[i];
+      b.progress += b.speed;
+      b.x = b.x + (b.targetX - b.x) * b.progress;
+      b.y = b.y + (b.targetY - b.y) * b.progress;
+      if (b.progress >= 1.0) {
+        this.siphonBeads.splice(i, 1);
+      }
+    }
+
+    // Slowdown rings update
+    for (let i = this.slowdownRings.length - 1; i >= 0; i--) {
+      const r = this.slowdownRings[i];
+      r.radius += 1.8;
+      r.alpha = Math.max(0, 1 - (r.radius / r.maxRadius));
+      if (r.radius >= r.maxRadius || r.alpha <= 0) {
+        this.slowdownRings.splice(i, 1);
+      }
+    }
+
+    // Shields update
+    for (let i = this.shields.length - 1; i >= 0; i--) {
+      const s = this.shields[i];
+      s.life--;
+      s.alpha = Math.max(0, s.life / s.maxLife);
+      if (s.life <= 0) {
+        this.shields.splice(i, 1);
+      }
+    }
+
+    // Laser beams update
+    for (let i = this.lasers.length - 1; i >= 0; i--) {
+      const l = this.lasers[i];
+      l.life--;
+      l.progress = Math.min(1.0, l.progress + 0.35);
+      l.alpha = Math.max(0, l.life / l.maxLife);
+
+      if (l.life > 6 && Math.random() < 0.8) {
+        this.addWallSparks(l.targetX, l.y, l.targetX > l.startX ? -1 : 1, l.color, 4);
+      }
+
+      if (l.life <= 0) {
+        this.lasers.splice(i, 1);
+      }
+    }
+
+    // Particles update
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= p.decay;
+      p.size = Math.max(0.1, p.size * 0.95);
+      if (p.alpha <= 0 || p.size <= 0.2) {
+        this.particles.splice(i, 1);
+      }
+    }
+
+    // Shockwaves update
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      const s = this.shockwaves[i];
+      s.radius += s.growth;
+      s.alpha = Math.max(0, 1 - (s.radius / s.maxRadius));
+      if (s.radius >= s.maxRadius || s.alpha <= 0) {
+        this.shockwaves.splice(i, 1);
+      }
+    }
+  }
+
+  draw(ctx, canvasWidth) {
+    ctx.save();
+
+    // 1. Draw Lasers
+    this.lasers.forEach(l => {
+      ctx.save();
+      const currentX = l.startX + (l.targetX - l.startX) * l.progress;
+      const minX = Math.min(l.startX, currentX);
+      const beamWidth = Math.abs(currentX - l.startX);
+      const topY = l.y - l.height / 2;
+
+      ctx.globalAlpha = l.alpha * 0.5;
+      ctx.fillStyle = l.color;
+      ctx.shadowColor = l.color;
+      ctx.shadowBlur = 35;
+      ctx.fillRect(minX, topY - 8, beamWidth, l.height + 16);
+
+      ctx.globalAlpha = l.alpha * 0.85;
+      ctx.fillStyle = l.color;
+      ctx.shadowBlur = 18;
+      ctx.fillRect(minX, topY, beamWidth, l.height);
+
+      ctx.globalAlpha = l.alpha * 0.95;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.shadowColor = '#FFFFFF';
+      ctx.shadowBlur = 12;
+      ctx.fillRect(minX, l.y - l.height * 0.2, beamWidth, l.height * 0.4);
+
+      ctx.globalAlpha = l.alpha * 0.7;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const steps = 8;
+      ctx.moveTo(l.startX, l.y);
+      for (let s = 1; s <= steps; s++) {
+        const segX = l.startX + (currentX - l.startX) * (s / steps);
+        const segY = l.y + (Math.random() - 0.5) * (l.height * 0.7);
+        ctx.lineTo(segX, segY);
+      }
+      ctx.stroke();
+
+      ctx.globalAlpha = l.alpha;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(l.startX, l.y, l.height * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(currentX, l.y, l.height * 0.55, 0, Math.PI * 2);
+      ctx.fillStyle = l.color;
+      ctx.fill();
+
+      ctx.restore();
+    });
+
+    // 2. Draw Energy Shields on Defending Paddle
+    this.shields.forEach(s => {
+      ctx.save();
+      ctx.globalAlpha = s.alpha;
+      ctx.shadowColor = s.color;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 3;
+
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, 16, s.height / 2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = s.alpha * 0.35;
+      ctx.fill();
+      ctx.globalAlpha = s.alpha;
+      ctx.stroke();
+
+      ctx.restore();
+    });
+
+    // 3. Draw Energy Siphon Beaded Stream
+    this.siphonBeads.forEach(b => {
+      ctx.save();
+      ctx.fillStyle = b.color;
+      ctx.shadowColor = b.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // 4. Draw Slowdown Deceleration Rings
+    this.slowdownRings.forEach(r => {
+      ctx.save();
+      ctx.strokeStyle = r.color;
+      ctx.globalAlpha = r.alpha;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // 5. Draw shockwaves
+    this.shockwaves.forEach(s => {
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = s.color;
+      ctx.globalAlpha = s.alpha;
+      ctx.lineWidth = s.lineWidth;
+      ctx.stroke();
+    });
+
+    // 6. Draw particles
+    this.particles.forEach(p => {
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'circle') {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      }
+    });
+
+    ctx.restore();
+  }
+
+  clear() {
+    this.particles = [];
+    this.shockwaves = [];
+    this.lasers = [];
+    this.shields = [];
+    this.siphonBeads = [];
+    this.slowdownRings = [];
+    this.shakeDuration = 0;
+    this.shakeOffsetX = 0;
+    this.shakeOffsetY = 0;
+  }
+}
+
+window.ParticleSystem = ParticleSystem;
+
+
+// ==================== File: js/ai.js ====================
+/**
+ * AI Opponent Logic for Pong Wars 1v1
+ */
+class AIController {
+  constructor(difficulty = 'medium') {
+    this.difficulty = difficulty; // 'easy', 'medium', 'hard', 'demon'
+    this.targetY = 300;
+    this.reactionTimer = 0;
+  }
+
+  setDifficulty(diff) {
+    this.difficulty = diff;
+  }
+
+  // Find the primary threat ball heading towards this paddle
+  findThreatBall(balls, paddle, isRightSide) {
+    const relevantBalls = balls.filter(b => isRightSide ? b.dx > 0 : b.dx < 0);
+    if (relevantBalls.length === 0) {
+      return balls.reduce((closest, b) => {
+        const dist = Math.abs(b.x - paddle.x);
+        return (!closest || dist < Math.abs(closest.x - paddle.x)) ? b : closest;
+      }, null);
+    }
+
+    return relevantBalls.reduce((urgent, b) => {
+      const dist = Math.abs(b.x - paddle.x);
+      const timeToArrive = dist / Math.max(0.1, Math.abs(b.dx));
+      if (!urgent) return b;
+      const urgentDist = Math.abs(urgent.x - paddle.x);
+      const urgentTime = urgentDist / Math.max(0.1, Math.abs(urgent.dx));
+      return timeToArrive < urgentTime ? b : urgent;
+    }, null);
+  }
+
+  // Predict ball intercept Y coordinate
+  predictBallLanding(ball, targetX, canvasHeight) {
+    if (!ball) return canvasHeight / 2;
+    let simX = ball.x;
+    let simY = ball.y;
+    let simDx = ball.dx;
+    let simDy = ball.dy;
+
+    const maxSteps = 140;
+    let step = 0;
+
+    while (step < maxSteps) {
+      if ((simDx > 0 && simX >= targetX) || (simDx < 0 && simX <= targetX)) {
+        break;
+      }
+      simX += simDx;
+      simY += simDy;
+
+      if (simY <= 15) {
+        simY = 15;
+        simDy = -simDy;
+      } else if (simY >= canvasHeight - 15) {
+        simY = canvasHeight - 15;
+        simDy = -simDy;
+      }
+      step++;
+    }
+    return simY;
+  }
+
+  update(paddle, balls, canvasHeight, isRightSide, gameState) {
+    const config = {
+      easy: { speed: 4.0, delayFrames: 18, errorMargin: 40 },
+      medium: { speed: 6.0, delayFrames: 10, errorMargin: 18 },
+      hard: { speed: 8.0, delayFrames: 4, errorMargin: 6 },
+      demon: { speed: 11.0, delayFrames: 0, errorMargin: 0 }
+    }[this.difficulty] || { speed: 6.0, delayFrames: 10, errorMargin: 18 };
+
+    this.reactionTimer++;
+    if (this.reactionTimer >= config.delayFrames) {
+      this.reactionTimer = 0;
+      const threatBall = this.findThreatBall(balls, paddle, isRightSide);
+
+      if (threatBall) {
+        if (this.difficulty === 'easy') {
+          this.targetY = threatBall.y + (Math.random() - 0.5) * config.errorMargin;
+        } else {
+          const predictedY = this.predictBallLanding(threatBall, paddle.x, canvasHeight);
+          const strategicOffset = (Math.sin(Date.now() / 1000) * 12);
+          this.targetY = predictedY + (Math.random() - 0.5) * config.errorMargin + strategicOffset;
+        }
+      } else {
+        this.targetY = canvasHeight / 2;
+      }
+    }
+
+    // Move paddle towards targetY
+    const distY = this.targetY - paddle.y;
+    if (Math.abs(distY) > 3) {
+      const moveStep = Math.min(config.speed, Math.abs(distY)) * Math.sign(distY);
+      paddle.y += moveStep;
+      paddle.vy = moveStep;
+    } else {
+      paddle.vy = 0;
+    }
+
+    paddle.y = Math.max(paddle.height / 2, Math.min(canvasHeight - paddle.height / 2, paddle.y));
+
+    // AI Normal Skill (Eclipse) - Cast whenever off 5s CD
+    if (gameState.p2SkillCD <= 0) {
+      if (Math.random() < 0.05) {
+        gameState.activateEclipse();
+      }
+    }
+
+    // AI Ultimate Skill (Laser Beam) - Cast when 100% charged
+    if (paddle.energy >= 100) {
+      if (Math.random() < 0.08) {
+        gameState.activateLaser(false);
+      }
+    }
+  }
+}
+
+window.AIController = AIController;
+
+
+// ==================== File: js/audio.js ====================
+/**
+ * Web Audio API procedural sound synthesizer for Pong Wars 1v1
+ */
+class SoundEngine {
+  constructor() {
+    this.ctx = null;
+    this.enabled = true;
+    this.masterGain = null;
+    this.volume = 0.5;
+
+    // Day scales (C Major Pentatonic / Bright high frequencies)
+    this.dayFrequencies = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0];
+    // Night scales (A Minor Pentatonic / Deep warm synth)
+    this.nightFrequencies = [110.0, 130.81, 146.83, 164.81, 196.0, 220.0, 261.63, 293.66, 329.63, 392.0];
+  }
+
+  init() {
+    if (!this.ctx) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        this.ctx = new AudioContext();
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+        this.masterGain.connect(this.ctx.destination);
+      }
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  setVolume(val) {
+    this.volume = Math.max(0, Math.min(1, val));
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+    }
+  }
+
+  toggleSound() {
+    this.enabled = !this.enabled;
+    if (this.enabled) {
+      this.init();
+    }
+    return this.enabled;
+  }
+
+  // Play a harmonic chime when a block flips
+  playBlockFlip(isDayTeam, combo = 0) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    const scale = isDayTeam ? this.dayFrequencies : this.nightFrequencies;
+    const noteIndex = Math.min(scale.length - 1, (combo % scale.length));
+    const baseFreq = scale[noteIndex];
+
+    osc.type = isDayTeam ? 'sine' : 'triangle';
+    osc.frequency.setValueAtTime(baseFreq, now);
+
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.16);
+  }
+
+  // Paddle bounce sound with energy siphon hum
+  playPaddleHit(isSmash = false) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = isSmash ? 'sawtooth' : 'triangle';
+    osc.frequency.setValueAtTime(isSmash ? 320 : 200, now);
+    osc.frequency.exponentialRampToValueAtTime(isSmash ? 80 : 90, now + 0.14);
+    gain.gain.setValueAtTime(isSmash ? 0.25 : 0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + 0.14);
+  }
+
+  // Shield absorbing enemy laser sound
+  playShieldAbsorb() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(260, now);
+    osc1.frequency.linearRampToValueAtTime(840, now + 0.3);
+
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(520, now);
+    osc2.frequency.exponentialRampToValueAtTime(120, now + 0.35);
+
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.35);
+    osc2.stop(now + 0.35);
+  }
+
+  // Stone crack or shatter sound
+  playStoneHit(isDestroyed = false) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(isDestroyed ? 280 : 180, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + (isDestroyed ? 0.22 : 0.12));
+
+    gain.gain.setValueAtTime(isDestroyed ? 0.35 : 0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + (isDestroyed ? 0.22 : 0.12));
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc.start(now);
+    osc.stop(now + (isDestroyed ? 0.22 : 0.12));
+  }
+
+  // Normal Skill activation sound
+  playSkill(type) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    if (type === 'solar') {
+      osc1.type = 'sine';
+      osc2.type = 'triangle';
+      osc1.frequency.setValueAtTime(350, now);
+      osc1.frequency.linearRampToValueAtTime(700, now + 0.25);
+      osc2.frequency.setValueAtTime(440, now);
+      osc2.frequency.linearRampToValueAtTime(880, now + 0.25);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    } else if (type === 'eclipse') {
+      osc1.type = 'sawtooth';
+      osc2.type = 'sine';
+      osc1.frequency.setValueAtTime(220, now);
+      osc1.frequency.exponentialRampToValueAtTime(660, now + 0.25);
+      osc2.frequency.setValueAtTime(110, now);
+      osc2.frequency.exponentialRampToValueAtTime(330, now + 0.25);
+
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+    } else if (type === 'petrify') {
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(150, now);
+      osc1.frequency.linearRampToValueAtTime(300, now + 0.22);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    } else {
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(300, now);
+      osc1.frequency.linearRampToValueAtTime(600, now + 0.18);
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    }
+
+    osc1.connect(gain);
+    if (type === 'solar' || type === 'eclipse') osc2.connect(gain);
+    gain.connect(this.masterGain);
+
+    osc1.start(now);
+    if (type === 'solar' || type === 'eclipse') osc2.start(now);
+    osc1.stop(now + 0.3);
+    if (type === 'solar' || type === 'eclipse') osc2.stop(now + 0.3);
+  }
+
+  // 3-Row Laser Ultimate Sound
+  playLaser(isDay = true) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(isDay ? 1050 : 720, now);
+    osc.frequency.exponentialRampToValueAtTime(isDay ? 240 : 150, now + 0.35);
+
+    const subOsc = this.ctx.createOscillator();
+    subOsc.type = 'triangle';
+    subOsc.frequency.setValueAtTime(160, now);
+    subOsc.frequency.exponentialRampToValueAtTime(35, now + 0.38);
+
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.35);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(1800, now);
+    noiseFilter.frequency.linearRampToValueAtTime(400, now + 0.35);
+    noiseFilter.Q.setValueAtTime(3.0, now);
+
+    const laserGain = this.ctx.createGain();
+    laserGain.gain.setValueAtTime(0.4, now);
+    laserGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.25, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+    osc.connect(laserGain);
+    subOsc.connect(laserGain);
+    laserGain.connect(this.masterGain);
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain);
+
+    osc.start(now);
+    subOsc.start(now);
+    noise.start(now);
+
+    osc.stop(now + 0.38);
+    subOsc.stop(now + 0.38);
+    noise.stop(now + 0.35);
+  }
+
+  // Explosion sound
+  playExplosion() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const now = this.ctx.currentTime;
+    const bufferSize = Math.floor(this.ctx.sampleRate * 0.3);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(600, now);
+    filter.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+
+    noise.start(now);
+    noise.stop(now + 0.3);
+  }
+
+  // Victory fanfare
+  playVictory(isDay) {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
+
+    const notes = isDay
+      ? [523.25, 659.25, 783.99, 1046.5]
+      : [440.0, 523.25, 659.25, 880.0];
+
+    notes.forEach((freq, i) => {
+      const now = this.ctx.currentTime + i * 0.12;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = isDay ? 'sine' : 'triangle';
+      osc.frequency.setValueAtTime(freq, now);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.45);
+    });
+  }
+}
+
+window.SoundEngine = SoundEngine;
+
+
+// ==================== File: js/main.js ====================
+/**
+ * UI Wiring, Event Listeners, and Game Lifecycle Controller
+ */
+
+document.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('pongCanvas');
+  const game = new PongWarsGame(canvas, {
+    squareSize: 25,
+    theme: 'classic',
+    mode: 'pve',
+    timeLimit: 90
+  });
+
+  // DOM Elements
+  const dayScoreEl = document.getElementById('dayScore');
+  const nightScoreEl = document.getElementById('nightScore');
+  const dayPercentEl = document.getElementById('dayPercent');
+  const nightPercentEl = document.getElementById('nightPercent');
+  const territoryBarDay = document.getElementById('territoryBarDay');
+  const timerDisplay = document.getElementById('timerDisplay');
+  const speedTierBadge = document.getElementById('speedTierBadge');
+  
+  const p1EnergyFill = document.getElementById('p1EnergyFill');
+  const p2EnergyFill = document.getElementById('p2EnergyFill');
+  const p1EnergyPct = document.getElementById('p1EnergyPct');
+  const p2EnergyPct = document.getElementById('p2EnergyPct');
+
+  const p1SkillBtn = document.getElementById('p1SkillBtn');
+  const p2SkillBtn = document.getElementById('p2SkillBtn');
+  const p1LaserBtn = document.getElementById('p1LaserBtn');
+  const p2LaserBtn = document.getElementById('p2LaserBtn');
+  const p1CDTag = document.getElementById('p1CDTag');
+  const p2CDTag = document.getElementById('p2CDTag');
+  const mobileControls = document.getElementById('mobileControls');
+
+  // Modals & Panels
+  const gameOverModal = document.getElementById('gameOverModal');
+  const winnerTitle = document.getElementById('winnerTitle');
+  const winnerSub = document.getElementById('winnerSub');
+  const restartBtn = document.getElementById('restartBtn');
+  const modalRestartBtn = document.getElementById('modalRestartBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const pauseBtnText = document.getElementById('pauseBtnText');
+  const soundBtn = document.getElementById('soundBtn');
+  const soundIcon = document.getElementById('soundIcon');
+  const volumeSlider = document.getElementById('volumeSlider');
+  const helpBtn = document.getElementById('helpBtn');
+  const helpModal = document.getElementById('helpModal');
+  const closeHelpBtn = document.getElementById('closeHelpBtn');
+  const closeHelpModalIconBtn = document.getElementById('closeHelpModalIconBtn');
+  const simSpeedSlider = document.getElementById('simSpeedSlider');
+  const simSpeedGroup = document.getElementById('simSpeedGroup');
+  const aiDiffGroup = document.getElementById('aiDiffGroup');
+  const aiDiffSelect = document.getElementById('aiDiffSelect');
+  const themeSelect = document.getElementById('themeSelect');
+  const modeButtons = document.querySelectorAll('.mode-btn');
+  const timeLimitSelect = document.getElementById('timeLimitSelect');
+  const gridSizeSelect = document.getElementById('gridSizeSelect');
+
+  // Aggressive Web Audio Autoplay Unlock
+  const unlockAudio = () => {
+    game.sound.init();
+    if (game.sound.ctx && game.sound.ctx.state === 'suspended') {
+      game.sound.ctx.resume().then(() => {
+        ['click', 'pointerdown', 'keydown', 'touchstart', 'mousemove', 'wheel'].forEach(evt => {
+          window.removeEventListener(evt, unlockAudio);
+        });
+      }).catch(() => {});
+    } else if (game.sound.ctx && game.sound.ctx.state === 'running') {
+      ['click', 'pointerdown', 'keydown', 'touchstart', 'mousemove', 'wheel'].forEach(evt => {
+        window.removeEventListener(evt, unlockAudio);
+      });
+    }
+  };
+
+  ['click', 'pointerdown', 'keydown', 'touchstart', 'mousemove', 'wheel'].forEach(evt => {
+    window.addEventListener(evt, unlockAudio, { passive: true });
+  });
+
+  // Input Listeners
+  window.addEventListener('keydown', (e) => {
+    unlockAudio();
+    game.keys[e.code] = true;
+
+    if (e.code === 'KeyP' || e.code === 'Escape') {
+      game.pause();
+      updatePauseUI();
+    } else if (e.code === 'KeyR') {
+      startNewGame();
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    game.keys[e.code] = false;
+  });
+
+  // Touch / Mobile virtual controls
+  let isTouching = false;
+  canvas.addEventListener('touchstart', (e) => {
+    unlockAudio();
+    isTouching = true;
+    handleTouchMove(e);
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (isTouching) {
+      e.preventDefault();
+      handleTouchMove(e);
+    }
+  }, { passive: false });
+
+  window.addEventListener('touchend', () => {
+    isTouching = false;
+  });
+
+  function handleTouchMove(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleY = canvas.height / rect.height;
+    const scaleX = canvas.width / rect.width;
+
+    for (let i = 0; i < e.touches.length; i++) {
+      const touch = e.touches[i];
+      const tx = (touch.clientX - rect.left) * scaleX;
+      const ty = (touch.clientY - rect.top) * scaleY;
+
+      if (tx < canvas.width / 2) {
+        game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+      } else if (game.mode === 'pvp') {
+        game.rightPaddle.y = Math.max(game.rightPaddle.height / 2, Math.min(canvas.height - game.rightPaddle.height / 2, ty));
+      }
+    }
+  }
+
+  // Mouse Drag on Canvas
+  let isMouseDown = false;
+  canvas.addEventListener('mousedown', (e) => {
+    unlockAudio();
+    isMouseDown = true;
+    handleMouseMove(e);
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (isMouseDown) handleMouseMove(e);
+  });
+  window.addEventListener('mouseup', () => {
+    isMouseDown = false;
+  });
+
+  function handleMouseMove(e) {
+    if (game.mode === 'sim') return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleY = canvas.height / rect.height;
+    const ty = (e.clientY - rect.top) * scaleY;
+    game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+  }
+
+  // Button actions
+  if (p1SkillBtn) {
+    p1SkillBtn.addEventListener('click', () => {
+      unlockAudio();
+      game.activateSolarFlare();
+    });
+  }
+  if (p2SkillBtn) {
+    p2SkillBtn.addEventListener('click', () => {
+      unlockAudio();
+      game.activateEclipse();
+    });
+  }
+  if (p1LaserBtn) {
+    p1LaserBtn.addEventListener('click', () => {
+      unlockAudio();
+      game.activateLaser(true);
+    });
+  }
+  if (p2LaserBtn) {
+    p2LaserBtn.addEventListener('click', () => {
+      unlockAudio();
+      game.activateLaser(false);
+    });
+  }
+
+  // Mode Selection
+  modeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      unlockAudio();
+      modeButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.mode;
+      game.setMode(mode);
+      
+      if (mode === 'sim') {
+        simSpeedGroup.style.display = 'flex';
+        aiDiffGroup.style.display = 'none';
+        if (mobileControls) mobileControls.style.display = 'none';
+      } else if (mode === 'pve') {
+        simSpeedGroup.style.display = 'none';
+        aiDiffGroup.style.display = 'flex';
+        if (mobileControls) mobileControls.style.display = 'grid';
+      } else {
+        simSpeedGroup.style.display = 'none';
+        aiDiffGroup.style.display = 'none';
+        if (mobileControls) mobileControls.style.display = 'grid';
+      }
+
+      startNewGame();
+    });
+  });
+
+  // AI Difficulty
+  aiDiffSelect.addEventListener('change', (e) => {
+    game.setAIDifficulty(e.target.value);
+  });
+
+  // Time Limit
+  timeLimitSelect.addEventListener('change', (e) => {
+    game.timeLimit = parseInt(e.target.value, 10);
+    game.timeLeft = game.timeLimit;
+  });
+
+  // Grid Size
+  gridSizeSelect.addEventListener('change', (e) => {
+    const size = parseInt(e.target.value, 10);
+    game.squareSize = size;
+    game.gridX = Math.floor(game.width / size);
+    game.gridY = Math.floor(game.height / size);
+    game.physics = new PhysicsEngine(game.gridX, game.gridY, size);
+    game.totalSquares = game.gridX * game.gridY;
+    startNewGame();
+  });
+
+  // Theme
+  themeSelect.addEventListener('change', (e) => {
+    game.setTheme(e.target.value);
+    applyThemeCSS(e.target.value);
+  });
+
+  function applyThemeCSS(themeKey) {
+    const t = THEMES[themeKey];
+    if (t) {
+      document.body.style.background = t.bg;
+      territoryBarDay.style.backgroundColor = t.dayColor;
+    }
+  }
+
+  // Simulation Speed
+  simSpeedSlider.addEventListener('input', (e) => {
+    game.simSpeed = parseFloat(e.target.value);
+    document.getElementById('simSpeedVal').textContent = `${game.simSpeed.toFixed(1)}x`;
+  });
+
+  // Sound Controls
+  soundBtn.addEventListener('click', () => {
+    unlockAudio();
+    const enabled = game.sound.toggleSound();
+    if (enabled) {
+      soundIcon.innerHTML = `
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+      `;
+      soundBtn.title = '开启音效';
+    } else {
+      soundIcon.innerHTML = `
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon>
+        <line x1="23" y1="9" x2="17" y2="15"></line>
+        <line x1="17" y1="9" x2="23" y2="15"></line>
+      `;
+      soundBtn.title = '已静音';
+    }
+  });
+
+  volumeSlider.addEventListener('input', (e) => {
+    game.sound.setVolume(parseFloat(e.target.value));
+  });
+
+  // Help Modal
+  helpBtn.addEventListener('click', () => helpModal.classList.add('show'));
+  closeHelpBtn.addEventListener('click', () => {
+    unlockAudio();
+    helpModal.classList.remove('show');
+  });
+  if (closeHelpModalIconBtn) {
+    closeHelpModalIconBtn.addEventListener('click', () => helpModal.classList.remove('show'));
+  }
+  window.addEventListener('click', (e) => {
+    if (e.target === helpModal) helpModal.classList.remove('show');
+  });
+
+  // Pause UI
+  function updatePauseUI() {
+    pauseBtnText.textContent = game.state === 'paused' ? '继续 (P)' : '暂停 (P)';
+  }
+  pauseBtn.addEventListener('click', () => {
+    unlockAudio();
+    game.pause();
+    updatePauseUI();
+  });
+
+  function startNewGame() {
+    gameOverModal.classList.remove('show');
+    game.start();
+    updatePauseUI();
+  }
+
+  restartBtn.addEventListener('click', () => {
+    unlockAudio();
+    startNewGame();
+  });
+  modalRestartBtn.addEventListener('click', () => {
+    unlockAudio();
+    startNewGame();
+  });
+
+  // Main UI update loop
+  let lastFrameTime = performance.now();
+
+  function loop(currentTime) {
+    const delta = currentTime - lastFrameTime;
+    lastFrameTime = currentTime;
+
+    game.update(delta);
+    game.draw();
+
+    // Update HUD Numbers
+    const dayPct = ((game.dayScore / game.totalSquares) * 100).toFixed(1);
+    const nightPct = ((game.nightScore / game.totalSquares) * 100).toFixed(1);
+
+    dayScoreEl.textContent = game.dayScore;
+    nightScoreEl.textContent = game.nightScore;
+    dayPercentEl.textContent = `${dayPct}%`;
+    nightPercentEl.textContent = `${nightPct}%`;
+    territoryBarDay.style.width = `${dayPct}%`;
+
+    // Speed Ratio & Penetration HUD
+    const speedRatio = (0.5 + Math.min(1.0, game.elapsedSeconds / 75.0) * 1.0).toFixed(1);
+    const penetration = speedRatio < 0.85 ? 1 : (speedRatio < 1.25 ? 2 : 3);
+    speedTierBadge.textContent = `速度 ${speedRatio}x · 连破 ${penetration}格`;
+
+    // Timer
+    if (game.timeLimit > 0) {
+      const mins = Math.floor(game.timeLeft / 60);
+      const secs = (game.timeLeft % 60).toString().padStart(2, '0');
+      timerDisplay.textContent = `${mins}:${secs}`;
+    } else {
+      timerDisplay.textContent = '∞';
+    }
+
+    // Normal Skill 5s Cooldowns
+    if (game.p1SkillCD > 0) {
+      const p1Sec = (game.p1SkillCD / 1000).toFixed(1);
+      p1CDTag.textContent = `${p1Sec}s`;
+      p1CDTag.classList.add('cooling');
+      p1SkillBtn.disabled = true;
+    } else {
+      p1CDTag.textContent = 'READY';
+      p1CDTag.classList.remove('cooling');
+      p1SkillBtn.disabled = false;
+    }
+
+    if (game.p2SkillCD > 0) {
+      const p2Sec = (game.p2SkillCD / 1000).toFixed(1);
+      p2CDTag.textContent = `${p2Sec}s`;
+      p2CDTag.classList.add('cooling');
+      p2SkillBtn.disabled = true;
+    } else {
+      p2CDTag.textContent = 'READY';
+      p2CDTag.classList.remove('cooling');
+      p2SkillBtn.disabled = false;
+    }
+
+    // Energy Bars for 3-Row Laser Ultimate
+    const p1E = Math.floor(game.leftPaddle.energy);
+    const p2E = Math.floor(game.rightPaddle.energy);
+
+    p1EnergyFill.style.width = `${p1E}%`;
+    p2EnergyFill.style.width = `${p2E}%`;
+    p1EnergyPct.textContent = `${p1E}%`;
+    p2EnergyPct.textContent = `${p2E}%`;
+
+    p1LaserBtn.disabled = p1E < 100;
+    p1LaserBtn.classList.toggle('ready', p1E >= 100);
+
+    p2LaserBtn.disabled = p2E < 100;
+    p2LaserBtn.classList.toggle('ready', p2E >= 100);
+
+    // Game Over Trigger
+    if (game.state === 'gameover' && !gameOverModal.classList.contains('show')) {
+      gameOverModal.classList.add('show');
+      const dayWon = game.dayScore >= game.nightScore;
+      winnerTitle.textContent = dayWon ? '昼方胜利 (Day Wins)' : '夜方胜利 (Night Wins)';
+      winnerTitle.style.color = dayWon ? game.theme.dayAccent : game.theme.nightAccent;
+      winnerSub.textContent = `最终领地占比：昼 ${dayPct}% vs 夜 ${nightPct}% (${game.dayScore} : ${game.nightScore})`;
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  // Initial Boot
+  applyThemeCSS('classic');
+  startNewGame();
+  requestAnimationFrame(loop);
+});
+
+
