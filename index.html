@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pong Wars 1v1 - 昼夜领地对决</title>
+  <meta name="description" content="基于经典 Pong Wars 演化的 1v1 实时领地争夺竞技游戏。支持双人同屏对战、智能 AI 挑战与原版禅意观战模式。" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- App Header -->
+  <header>
+    <div class="logo-group">
+      <svg class="svg-icon logo-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" stroke="#FFC801" stroke-width="2" />
+        <path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 0-10 5 5 0 0 1 0-10z" fill="#D9E8E3" stroke="none" />
+        <circle cx="12" cy="7" r="2" fill="#114C5A" />
+        <circle cx="12" cy="17" r="2" fill="#D9E8E3" />
+      </svg>
+      <h1>Pong Wars 1v1 <span class="header-sub">| 昼夜领地对战</span></h1>
+    </div>
+
+    <div class="header-controls">
+      <div class="volume-container">
+        <button class="btn-icon" id="soundBtn" title="切换音效">
+          <svg class="svg-icon" id="soundIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+          </svg>
+        </button>
+        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="0.5" title="音量调节" />
+      </div>
+      <button class="btn-icon" id="helpBtn" title="玩法说明与按键">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Game Wrapper -->
+  <main class="main-wrapper">
+
+    <!-- Mode Switcher Tabs -->
+    <div class="mode-tabs">
+      <button class="mode-btn active" data-mode="pve">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="4" width="16" height="16" rx="2"></rect>
+          <rect x="9" y="9" width="6" height="6"></rect>
+          <line x1="9" y1="1" x2="9" y2="4"></line>
+          <line x1="15" y1="1" x2="15" y2="4"></line>
+          <line x1="9" y1="20" x2="9" y2="23"></line>
+          <line x1="15" y1="20" x2="15" y2="23"></line>
+          <line x1="20" y1="9" x2="23" y2="9"></line>
+          <line x1="20" y1="14" x2="23" y2="14"></line>
+          <line x1="1" y1="9" x2="4" y2="9"></line>
+          <line x1="1" y1="14" x2="4" y2="14"></line>
+        </svg>
+        <span>人机对战 (PVE)</span>
+      </button>
+
+      <button class="mode-btn" data-mode="pvp">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"></polyline>
+          <line x1="13" y1="19" x2="19" y2="13"></line>
+          <line x1="16" y1="16" x2="20" y2="20"></line>
+          <line x1="19" y1="21" x2="21" y2="19"></line>
+          <polyline points="14.5 6.5 18 3 21 3 21 6 17.5 9.5"></polyline>
+          <line x1="5" y1="14" x2="9" y2="18"></line>
+          <line x1="7" y1="17" x2="4" y2="20"></line>
+          <line x1="3" y1="19" x2="5" y2="21"></line>
+        </svg>
+        <span>双人同屏 (PVP)</span>
+      </button>
+
+      <button class="mode-btn" data-mode="sim">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <circle cx="12" cy="12" r="4"></circle>
+          <line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line>
+          <line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line>
+          <line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line>
+          <line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line>
+        </svg>
+        <span>禅意原版 (SIM)</span>
+      </button>
+    </div>
+
+    <!-- HUD Card -->
+    <div class="hud-card">
+      <div class="hud-top">
+        <div class="team-hud">
+          <div class="team-badge-icon day-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#FFC801" stroke-width="2">
+              <circle cx="12" cy="12" r="5" fill="#FFC801"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+          </div>
+          <div class="team-meta">
+            <span class="team-title">昼方 · 曜石黑球</span>
+            <span class="team-score day-text" id="dayScore">288</span>
+          </div>
+        </div>
+
+        <div class="timer-center-group">
+          <div class="match-timer" id="timerDisplay">01:30</div>
+          <div class="speed-tier-badge" id="speedTierBadge">速度 0.5x · 连破 1格</div>
+        </div>
+
+        <div class="team-hud" style="flex-direction: row-reverse; text-align: right;">
+          <div class="team-badge-icon night-icon">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="#7000FF" stroke="#A78BFA" stroke-width="1.5">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </div>
+          <div class="team-meta">
+            <span class="team-title">夜方 · 纯白光球</span>
+            <span class="team-score night-text" id="nightScore">288</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Territory Progress Bar -->
+      <div class="territory-bar-wrapper">
+        <div class="territory-bar-day" id="territoryBarDay"></div>
+      </div>
+      <div class="territory-labels">
+        <span id="dayPercent">50.0%</span>
+        <span>领地争夺比例</span>
+        <span id="nightPercent">50.0%</span>
+      </div>
+
+      <!-- Energy Gauges for Laser Ultimate -->
+      <div class="energy-row" id="energyRow">
+        <div class="energy-item">
+          <span class="energy-label">P1 激光大招</span>
+          <div class="energy-bar-bg">
+            <div class="energy-bar-fill" id="p1EnergyFill"></div>
+          </div>
+          <span class="energy-pct" id="p1EnergyPct">0%</span>
+        </div>
+        <div class="energy-item right">
+          <span class="energy-pct" id="p2EnergyPct">0%</span>
+          <div class="energy-bar-bg">
+            <div class="energy-bar-fill night-energy" id="p2EnergyFill"></div>
+          </div>
+          <span class="energy-label">P2 激光大招</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Canvas Area -->
+    <div class="canvas-wrapper">
+      <canvas id="pongCanvas" width="600" height="600"></canvas>
+    </div>
+
+    <!-- Mobile Virtual Action Buttons -->
+    <div class="mobile-controls" id="mobileControls">
+      <button class="action-btn" id="p1SkillBtn">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v3m0 14v3M2 12h3m14 0h3"></path>
+        </svg>
+        <span>P1 耀斑 (E)</span>
+        <span class="cd-tag" id="p1CDTag">READY</span>
+      </button>
+
+      <button class="action-btn ult-btn" id="p1LaserBtn" disabled>
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="2" y1="12" x2="22" y2="12" stroke-width="3"></line>
+          <polyline points="15 6 22 12 15 18"></polyline>
+        </svg>
+        <span>P1 3行激光 (Space)</span>
+      </button>
+
+      <button class="action-btn" id="p2SkillBtn">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+        <span>P2 月蚀 (Shift)</span>
+        <span class="cd-tag" id="p2CDTag">READY</span>
+      </button>
+
+      <button class="action-btn ult-btn" id="p2LaserBtn" disabled>
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="12" x2="2" y2="12" stroke-width="3"></line>
+          <polyline points="9 6 2 12 9 18"></polyline>
+        </svg>
+        <span>P2 3行激光 (Enter)</span>
+      </button>
+    </div>
+
+    <!-- Settings Toolbar -->
+    <div class="toolbar-card">
+      <div class="setting-group" id="aiDiffGroup">
+        <label for="aiDiffSelect">AI难度:</label>
+        <select id="aiDiffSelect">
+          <option value="easy">简单 (Easy)</option>
+          <option value="medium" selected>中等 (Medium)</option>
+          <option value="hard">专家 (Hard)</option>
+          <option value="demon">恶魔级 (Demon)</option>
+        </select>
+      </div>
+
+      <div class="setting-group" id="simSpeedGroup" style="display: none;">
+        <label for="simSpeedSlider">演化速度: <span id="simSpeedVal">1.0x</span></label>
+        <input type="range" id="simSpeedSlider" min="0.5" max="3.0" step="0.25" value="1.0" />
+      </div>
+
+      <div class="setting-group">
+        <label for="timeLimitSelect">对战时长:</label>
+        <select id="timeLimitSelect">
+          <option value="60">60 秒</option>
+          <option value="90" selected>90 秒</option>
+          <option value="120">120 秒</option>
+          <option value="0">无限 (至死方休)</option>
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label for="gridSizeSelect">网格精度:</label>
+        <select id="gridSizeSelect">
+          <option value="30">20×20 (畅快大格)</option>
+          <option value="25" selected>24×24 (经典原版)</option>
+          <option value="20">30×30 (精细密格)</option>
+        </select>
+      </div>
+
+      <div class="setting-group">
+        <label for="themeSelect">主题配色:</label>
+        <select id="themeSelect">
+          <option value="classic" selected>经典昼夜 (Day & Night)</option>
+          <option value="cyberpunk">赛博霓虹 (Cyberpunk)</option>
+          <option value="elemental">冰火交锋 (Fire & Ice)</option>
+          <option value="void">曜金虚空 (Solar & Void)</option>
+          <option value="monochrome">极简黑白 (Monochrome)</option>
+        </select>
+      </div>
+
+      <div class="toolbar-btn-group">
+        <button class="btn-secondary" id="pauseBtn">
+          <svg class="svg-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          <span id="pauseBtnText">暂停 (P)</span>
+        </button>
+        <button class="btn-primary" id="restartBtn">
+          <svg class="svg-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          <span>重开 (R)</span>
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Help & Guide Modal -->
+  <div class="modal-overlay" id="helpModal">
+    <div class="modal-card">
+      <div class="modal-header-row">
+        <h2 class="modal-title">玩法与机制说明</h2>
+        <button class="close-modal-btn" id="closeHelpModalIconBtn">&times;</button>
+      </div>
+      <p class="modal-sub">挡板接球偷取能量并减速敌球；当敌方释放大招时，移动挡板格挡可保护后方领地并吸收回复 +30% 大招充能！</p>
+
+      <div class="guide-section">
+        <h4 class="guide-title">按键操作</h4>
+        <div class="guide-row">
+          <span>玩家 1 (昼方 / 左侧)</span>
+          <span><span class="key-badge">W</span> / <span class="key-badge">S</span> 移动</span>
+        </div>
+        <div class="guide-row">
+          <span>P1 普技 (耀斑 / 5s CD)</span>
+          <span><span class="key-badge">E</span> (随机打击敌方领地)</span>
+        </div>
+        <div class="guide-row">
+          <span>P1 终极大招 (3行激光)</span>
+          <span><span class="key-badge">Space</span> (挡板高度发射)</span>
+        </div>
+        <hr class="guide-divider" />
+        <div class="guide-row">
+          <span>玩家 2 (夜方 / 右侧)</span>
+          <span><span class="key-badge">↑</span> / <span class="key-badge">↓</span> 移动</span>
+        </div>
+        <div class="guide-row">
+          <span>P2 普技 (月蚀 / 5s CD)</span>
+          <span><span class="key-badge">Right Shift</span> (随机打击昼方领地)</span>
+        </div>
+        <div class="guide-row">
+          <span>P2 终极大招 (3行激光)</span>
+          <span><span class="key-badge">Enter</span> (挡板高度发射)</span>
+        </div>
+      </div>
+
+      <div class="guide-section">
+        <h4 class="guide-title">大招格挡与博弈机制</h4>
+        <p>• <strong>大招激光格挡与保护</strong>：敌方发射激光时，我方挡板移至激光路径可强行拦截，<strong>完全保护挡板后方领地不被转化</strong>，同时吸收高能<strong>回复 +30% 大招充能</strong>！</p>
+        <p>• <strong>接球能量偷取与减速</strong>：接住小球时偷取敌方 4% 能量、充能己方 6%，并使球速降低 25%。速度越慢，连破数越少（最低 1 格）。</p>
+        <p>• <strong>5 格石化要塞道具</strong>：拾取后在敌方领地生成 5 个己方 2 层护甲石化方块。低速需击打 2 次夺回；高速（3连破）只需 1 次，但该击消耗全部穿透动能（强制变为 1 破并反弹）。</p>
+      </div>
+
+      <button class="btn-primary" id="closeHelpBtn" style="padding: 10px; width: 100%; justify-content: center;">确认开始对决</button>
+    </div>
+  </div>
+
+  <!-- Game Over Modal -->
+  <div class="modal-overlay" id="gameOverModal">
+    <div class="modal-card">
+      <h2 class="modal-title" id="winnerTitle">昼方胜利</h2>
+      <p class="modal-sub" id="winnerSub">最终领地占比：昼 58.2% vs 夜 41.8%</p>
+      
+      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 8px;">
+        <button class="btn-primary" id="modalRestartBtn" style="padding: 12px 28px; font-size: 14px;">
+          <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          <span>再来一局 (R)</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p>
+      致敬原创 <strong>Pong Wars</strong> by <a href="https://koenvangilst.nl/labs/pong-wars" target="_blank">Koen van Gilst</a> & <a href="https://x.com/denicmarko" target="_blank">Marko Denic</a> | 1v1 Battle Edition
+    </p>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/audio.js"></script>
+  <script src="js/particles.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

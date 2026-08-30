@@ -1,0 +1,908 @@
+/**
+ * Main Game State and Controller for Pong Wars 1v1
+ */
+
+const THEMES = {
+  classic: {
+    name: '经典昼夜 (Day & Night)',
+    dayColor: '#D9E8E3',
+    dayBall: '#141414', // Obsidian Black
+    dayAccent: '#2A9D8F',
+    nightColor: '#114C5A',
+    nightBall: '#FFFFFF', // Pure Crystal White
+    nightAccent: '#E76F51',
+    bg: 'linear-gradient(135deg, #172B36 0%, #0F1D24 100%)'
+  },
+  cyberpunk: {
+    name: '赛博霓虹 (Cyberpunk)',
+    dayColor: '#00F0FF',
+    dayBall: '#141414',
+    dayAccent: '#00F0FF',
+    nightColor: '#1A0B2E',
+    nightBall: '#FFFFFF',
+    nightAccent: '#FF007F',
+    bg: 'linear-gradient(135deg, #090214 0%, #1a0826 100%)'
+  },
+  elemental: {
+    name: '冰火交锋 (Fire & Ice)',
+    dayColor: '#FFE5B4',
+    dayBall: '#141414',
+    dayAccent: '#F77F00',
+    nightColor: '#1D3557',
+    nightBall: '#FFFFFF',
+    nightAccent: '#A8DADC',
+    bg: 'linear-gradient(135deg, #0b1726 0%, #201115 100%)'
+  },
+  void: {
+    name: '曜金虚空 (Solar & Void)',
+    dayColor: '#FFF3B0',
+    dayBall: '#141414',
+    dayAccent: '#FFD700',
+    nightColor: '#331832',
+    nightBall: '#FFFFFF',
+    nightAccent: '#9E2A2B',
+    bg: 'linear-gradient(135deg, #180c18 0%, #29121a 100%)'
+  },
+  monochrome: {
+    name: '极简黑白 (Monochrome)',
+    dayColor: '#F5F5F7',
+    dayBall: '#141414',
+    dayAccent: '#86868B',
+    nightColor: '#1D1D1F',
+    nightBall: '#FFFFFF',
+    nightAccent: '#E5E5EA',
+    bg: 'linear-gradient(135deg, #111112 0%, #222225 100%)'
+  }
+};
+
+const BASE_BALL_SPEED = 8.0;
+
+class PongWarsGame {
+  constructor(canvas, options = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    
+    this.width = canvas.width;
+    this.height = canvas.height;
+
+    this.squareSize = options.squareSize || 25;
+    this.gridX = Math.floor(this.width / this.squareSize);
+    this.gridY = Math.floor(this.height / this.squareSize);
+
+    this.sound = new SoundEngine();
+    this.particles = new ParticleSystem();
+    this.physics = new PhysicsEngine(this.gridX, this.gridY, this.squareSize);
+    this.ai = new AIController('medium');
+
+    this.currentThemeKey = options.theme || 'classic';
+    this.theme = THEMES[this.currentThemeKey];
+    this.mode = options.mode || 'pve';
+    this.state = 'idle';
+    
+    this.timeLimit = options.timeLimit || 90;
+    this.timeLeft = this.timeLimit;
+    this.elapsedSeconds = 0;
+    this.timerAcc = 0;
+
+    // Normal Skill 5-second Cooldowns
+    this.p1SkillCD = 0;
+    this.p2SkillCD = 0;
+
+    // Territory Scores
+    this.dayScore = 0;
+    this.nightScore = 0;
+    this.totalSquares = this.gridX * this.gridY;
+    this.dayCombo = 0;
+    this.nightCombo = 0;
+
+    this.squares = [];
+    this.stoneGrid = [];
+    this.leftPaddle = this.createPaddle(30, true);
+    this.rightPaddle = this.createPaddle(this.width - 30, false);
+    this.balls = [];
+    this.powerups = [];
+    this.powerupSpawnTimer = 0;
+    this.keys = {};
+    this.simSpeed = 1.0;
+  }
+
+  createPaddle(x, isLeft) {
+    return {
+      x: x,
+      y: this.height / 2,
+      width: 14,
+      height: 90,
+      speed: 7.5,
+      vy: 0,
+      energy: 0,
+      frozenTimer: 0,
+      isLeft: isLeft
+    };
+  }
+
+  setTheme(themeKey) {
+    if (THEMES[themeKey]) {
+      this.currentThemeKey = themeKey;
+      const oldTheme = this.theme;
+      this.theme = THEMES[themeKey];
+
+      for (let i = 0; i < this.gridX; i++) {
+        for (let j = 0; j < this.gridY; j++) {
+          if (this.squares[i] && this.squares[i][j] === oldTheme.dayColor) {
+            this.squares[i][j] = this.theme.dayColor;
+          } else if (this.squares[i] && this.squares[i][j] === oldTheme.nightColor) {
+            this.squares[i][j] = this.theme.nightColor;
+          }
+        }
+      }
+
+      this.balls.forEach(b => {
+        if (b.team === 'day') {
+          b.reverseColor = this.theme.dayColor;
+          b.ballColor = '#141414';
+        } else {
+          b.reverseColor = this.theme.nightColor;
+          b.ballColor = '#FFFFFF';
+        }
+      });
+    }
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    this.reset();
+  }
+
+  setAIDifficulty(diff) {
+    this.ai.setDifficulty(diff);
+  }
+
+  reset() {
+    this.squares = this.physics.createGrid(this.theme.dayColor, this.theme.nightColor);
+    this.stoneGrid = this.physics.createStoneGrid();
+    this.particles.clear();
+    this.powerups = [];
+    this.powerupSpawnTimer = 0;
+    this.timeLeft = this.timeLimit;
+    this.elapsedSeconds = 0;
+    this.timerAcc = 0;
+    this.p1SkillCD = 0;
+    this.p2SkillCD = 0;
+    this.dayCombo = 0;
+    this.nightCombo = 0;
+
+    this.leftPaddle = this.createPaddle(30, true);
+    this.rightPaddle = this.createPaddle(this.width - 30, false);
+
+    const initialSpeed = BASE_BALL_SPEED * 0.5;
+
+    this.balls = [
+      {
+        x: this.width / 4,
+        y: this.height / 2,
+        dx: initialSpeed,
+        dy: -initialSpeed,
+        team: 'day',
+        reverseColor: this.theme.dayColor,
+        ballColor: '#141414',
+        radius: this.squareSize / 2,
+        penetrationCapacity: 1,
+        remainingPenetration: 1
+      },
+      {
+        x: (this.width / 4) * 3,
+        y: this.height / 2,
+        dx: -initialSpeed,
+        dy: initialSpeed,
+        team: 'night',
+        reverseColor: this.theme.nightColor,
+        ballColor: '#FFFFFF',
+        radius: this.squareSize / 2,
+        penetrationCapacity: 1,
+        remainingPenetration: 1
+      }
+    ];
+
+    this.calculateTerritory();
+    this.state = 'idle';
+  }
+
+  start() {
+    this.sound.init();
+    this.reset();
+    this.state = 'running';
+  }
+
+  pause() {
+    if (this.state === 'running') this.state = 'paused';
+    else if (this.state === 'paused') this.state = 'running';
+  }
+
+  calculateTerritory() {
+    let day = 0;
+    let night = 0;
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] === this.theme.dayColor) day++;
+        else if (this.squares[i][j] === this.theme.nightColor) night++;
+      }
+    }
+    this.dayScore = day;
+    this.nightScore = night;
+  }
+
+  // Normal Skill: Solar Flare
+  activateSolarFlare() {
+    if (this.p1SkillCD > 0) return;
+    this.p1SkillCD = 5000;
+
+    const enemyTiles = [];
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] === this.theme.nightColor) {
+          enemyTiles.push({ i, j });
+        }
+      }
+    }
+
+    if (enemyTiles.length === 0) return;
+    const target = enemyTiles[Math.floor(Math.random() * enemyTiles.length)];
+
+    this.sound.playSkill('solar');
+    this.particles.shake(10, 5);
+
+    const radius = 1.5;
+    for (let i = target.i - 2; i <= target.i + 2; i++) {
+      for (let j = target.j - 2; j <= target.j + 2; j++) {
+        if (i >= 0 && i < this.gridX && j >= 0 && j < this.gridY) {
+          const dist = Math.hypot(i - target.i, j - target.j);
+          if (dist <= radius) {
+            this.squares[i][j] = this.theme.dayColor;
+            if (this.stoneGrid[i][j]) this.stoneGrid[i][j] = null;
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              this.theme.dayColor,
+              4
+            );
+          }
+        }
+      }
+    }
+
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#FFD700', 65);
+    this.calculateTerritory();
+  }
+
+  // Normal Skill: Eclipse
+  activateEclipse() {
+    if (this.p2SkillCD > 0) return;
+    this.p2SkillCD = 5000;
+
+    const enemyTiles = [];
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] === this.theme.dayColor) {
+          enemyTiles.push({ i, j });
+        }
+      }
+    }
+
+    if (enemyTiles.length === 0) return;
+    const target = enemyTiles[Math.floor(Math.random() * enemyTiles.length)];
+
+    this.sound.playSkill('eclipse');
+    this.particles.shake(10, 5);
+
+    const radius = 1.5;
+    for (let i = target.i - 2; i <= target.i + 2; i++) {
+      for (let j = target.j - 2; j <= target.j + 2; j++) {
+        if (i >= 0 && i < this.gridX && j >= 0 && j < this.gridY) {
+          const dist = Math.hypot(i - target.i, j - target.j);
+          if (dist <= radius) {
+            this.squares[i][j] = this.theme.nightColor;
+            if (this.stoneGrid[i][j]) this.stoneGrid[i][j] = null;
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              this.theme.nightColor,
+              4
+            );
+          }
+        }
+      }
+    }
+
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#7000FF', 65);
+    this.calculateTerritory();
+  }
+
+  // Ultimate Skill: 3-Row Laser Beam with Paddle Shielding & Energy Absorption
+  activateLaser(isLeft = true) {
+    const caster = isLeft ? this.leftPaddle : this.rightPaddle;
+    const defender = isLeft ? this.rightPaddle : this.leftPaddle;
+    if (caster.energy < 100) return;
+
+    caster.energy = 0;
+    const targetColor = isLeft ? this.theme.dayColor : this.theme.nightColor;
+    const beamColor = isLeft ? (this.theme.dayAccent || '#FFD700') : (this.theme.nightAccent || '#7000FF');
+
+    let centerRow = Math.floor(caster.y / this.squareSize);
+    centerRow = Math.max(1, Math.min(this.gridY - 2, centerRow));
+    const beamRows = [centerRow - 1, centerRow, centerRow + 1];
+
+    const laserY = centerRow * this.squareSize + this.squareSize / 2;
+    const laserTopY = (centerRow - 1) * this.squareSize;
+    const laserBottomY = (centerRow + 2) * this.squareSize;
+
+    const startX = isLeft ? caster.x + caster.width / 2 : caster.x - caster.width / 2;
+
+    // Check if the defender paddle intercepts/blocks the laser
+    const defTopY = defender.y - defender.height / 2;
+    const defBottomY = defender.y + defender.height / 2;
+    const isBlocked = (this.mode !== 'sim') && (Math.max(laserTopY, defTopY) < Math.min(laserBottomY, defBottomY));
+
+    let targetX = isLeft ? this.width : 0;
+    const defenderCol = Math.floor(defender.x / this.squareSize);
+
+    if (isBlocked) {
+      targetX = isLeft ? (defender.x - defender.width / 2) : (defender.x + defender.width / 2);
+      
+      // Defender absorbs energy (+30%)
+      defender.energy = Math.min(100, defender.energy + 30.0);
+
+      // Sound & VFX
+      this.sound.playShieldAbsorb();
+      this.particles.shake(14, 6);
+      this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#7000FF') : (this.theme.dayAccent || '#FFD700'), 25);
+    } else {
+      this.sound.playLaser(isLeft);
+      this.particles.shake(18, 8);
+    }
+
+    this.particles.addLaserBeam(startX, targetX, laserY, this.squareSize * 3, beamColor, 18);
+
+    // Convert blocks, protecting any blocks behind the defending paddle
+    beamRows.forEach(r => {
+      if (r >= 0 && r < this.gridY) {
+        for (let i = 0; i < this.gridX; i++) {
+          if (isBlocked) {
+            if (isLeft && i >= defenderCol) continue;
+            if (!isLeft && i <= defenderCol) continue;
+          }
+
+          this.squares[i][r] = targetColor;
+          if (this.stoneGrid[i][r]) this.stoneGrid[i][r] = null;
+          if (i % 2 === 0) {
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              r * this.squareSize + this.squareSize / 2,
+              targetColor,
+              2
+            );
+          }
+        }
+      }
+    });
+
+    this.calculateTerritory();
+  }
+
+  spawnRandomPowerup() {
+    if (this.powerups.length >= 2) return;
+    const types = ['bomb', 'multiball', 'freeze', 'speed', 'petrify'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const gx = Math.floor(Math.random() * (this.gridX - 4)) + 2;
+    const gy = Math.floor(Math.random() * (this.gridY - 4)) + 2;
+
+    this.powerups.push({
+      type: type,
+      x: gx * this.squareSize + this.squareSize / 2,
+      y: gy * this.squareSize + this.squareSize / 2,
+      radius: 11,
+      timer: 600
+    });
+  }
+
+  applyPowerup(powerup, ball) {
+    const isDay = ball.team === 'day';
+    const enemyPaddle = isDay ? this.rightPaddle : this.leftPaddle;
+
+    if (powerup.type === 'petrify') {
+      this.sound.playSkill('petrify');
+      this.particles.shake(12, 5);
+
+      const enemyColor = isDay ? this.theme.nightColor : this.theme.dayColor;
+      const enemyTiles = [];
+      for (let i = 0; i < this.gridX; i++) {
+        for (let j = 0; j < this.gridY; j++) {
+          if (this.squares[i][j] === enemyColor) {
+            enemyTiles.push({ i, j });
+          }
+        }
+      }
+
+      const count = Math.min(5, enemyTiles.length);
+      for (let k = 0; k < count; k++) {
+        const randIdx = Math.floor(Math.random() * enemyTiles.length);
+        const pick = enemyTiles.splice(randIdx, 1)[0];
+        if (pick) {
+          this.squares[pick.i][pick.j] = ball.reverseColor;
+          this.stoneGrid[pick.i][pick.j] = { hp: 2, maxHp: 2, owner: ball.team };
+          this.particles.addStoneDebris(
+            pick.i * this.squareSize + this.squareSize / 2,
+            pick.j * this.squareSize + this.squareSize / 2,
+            false
+          );
+        }
+      }
+    } else if (powerup.type === 'bomb') {
+      this.sound.playSkill('generic');
+      this.sound.playExplosion();
+      this.particles.shake(12, 6);
+      const centerI = Math.floor(powerup.x / this.squareSize);
+      const centerJ = Math.floor(powerup.y / this.squareSize);
+      for (let i = centerI - 2; i <= centerI + 2; i++) {
+        for (let j = centerJ - 2; j <= centerJ + 2; j++) {
+          if (i >= 0 && i < this.gridX && j >= 0 && j < this.gridY) {
+            this.squares[i][j] = ball.reverseColor;
+            if (this.stoneGrid[i][j]) this.stoneGrid[i][j] = null;
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              ball.reverseColor,
+              3
+            );
+          }
+        }
+      }
+      this.particles.addShockwave(powerup.x, powerup.y, ball.reverseColor, 70);
+    } else if (powerup.type === 'multiball') {
+      this.sound.playSkill('generic');
+      for (let k = -1; k <= 1; k += 2) {
+        this.balls.push({
+          x: ball.x,
+          y: ball.y,
+          dx: ball.dx * 0.9 + k * 1.2,
+          dy: ball.dy * 0.9 - k * 1.2,
+          team: ball.team,
+          reverseColor: ball.reverseColor,
+          ballColor: ball.ballColor,
+          radius: this.squareSize / 2,
+          penetrationCapacity: ball.penetrationCapacity,
+          remainingPenetration: 1,
+          isExtra: true,
+          lifetime: 500
+        });
+      }
+    } else if (powerup.type === 'freeze') {
+      this.sound.playSkill('generic');
+      enemyPaddle.frozenTimer = 150;
+    } else if (powerup.type === 'speed') {
+      this.sound.playSkill('generic');
+      ball.penetrationCapacity = Math.min(3, ball.penetrationCapacity + 1);
+      ball.remainingPenetration = ball.penetrationCapacity;
+    }
+
+    this.calculateTerritory();
+  }
+
+  handleInput() {
+    if (this.mode === 'sim') return;
+
+    // P1 Controls
+    const p1Speed = this.leftPaddle.frozenTimer > 0 ? this.leftPaddle.speed * 0.45 : this.leftPaddle.speed;
+    this.leftPaddle.vy = 0;
+    if (this.keys['KeyW'] || this.keys['w'] || this.keys['W']) {
+      this.leftPaddle.y -= p1Speed;
+      this.leftPaddle.vy = -p1Speed;
+    }
+    if (this.keys['KeyS'] || this.keys['s'] || this.keys['S']) {
+      this.leftPaddle.y += p1Speed;
+      this.leftPaddle.vy = p1Speed;
+    }
+    if (this.keys['KeyE'] || this.keys['e'] || this.keys['E']) {
+      this.activateSolarFlare();
+    }
+    if (this.keys['Space'] || this.keys[' ']) {
+      this.activateLaser(true);
+    }
+
+    // P2 Controls
+    if (this.mode === 'pvp') {
+      const p2Speed = this.rightPaddle.frozenTimer > 0 ? this.rightPaddle.speed * 0.45 : this.rightPaddle.speed;
+      this.rightPaddle.vy = 0;
+      if (this.keys['ArrowUp']) {
+        this.rightPaddle.y -= p2Speed;
+        this.rightPaddle.vy = -p2Speed;
+      }
+      if (this.keys['ArrowDown']) {
+        this.rightPaddle.y += p2Speed;
+        this.rightPaddle.vy = p2Speed;
+      }
+      if (this.keys['ShiftRight'] || this.keys['Slash']) {
+        this.activateEclipse();
+      }
+      if (this.keys['Enter'] || this.keys['NumpadEnter']) {
+        this.activateLaser(false);
+      }
+    }
+
+    this.leftPaddle.y = Math.max(this.leftPaddle.height / 2, Math.min(this.height - this.leftPaddle.height / 2, this.leftPaddle.y));
+    this.rightPaddle.y = Math.max(this.rightPaddle.height / 2, Math.min(this.height - this.rightPaddle.height / 2, this.rightPaddle.y));
+  }
+
+  update(delta) {
+    if (this.state !== 'running') return;
+
+    this.elapsedSeconds += delta / 1000;
+    if (this.timeLimit > 0) {
+      this.timerAcc += delta;
+      if (this.timerAcc >= 1000) {
+        this.timeLeft--;
+        this.timerAcc -= 1000;
+        if (this.timeLeft <= 0) {
+          this.endGame();
+          return;
+        }
+      }
+    }
+
+    if (this.p1SkillCD > 0) this.p1SkillCD = Math.max(0, this.p1SkillCD - delta);
+    if (this.p2SkillCD > 0) this.p2SkillCD = Math.max(0, this.p2SkillCD - delta);
+
+    if (this.dayScore === this.totalSquares || this.nightScore === this.totalSquares) {
+      this.endGame();
+      return;
+    }
+
+    const globalSpeedRatio = 0.5 + Math.min(1.0, this.elapsedSeconds / 75.0) * 1.0;
+    const globalTargetSpeed = BASE_BALL_SPEED * globalSpeedRatio;
+
+    this.handleInput();
+
+    if (this.mode === 'pve') {
+      this.ai.update(this.rightPaddle, this.balls, this.height, true, this);
+    }
+
+    [this.leftPaddle, this.rightPaddle].forEach(p => {
+      if (p.frozenTimer > 0) p.frozenTimer--;
+    });
+
+    this.powerupSpawnTimer++;
+    if (this.powerupSpawnTimer >= 450 && this.mode !== 'sim') {
+      this.powerupSpawnTimer = 0;
+      this.spawnRandomPowerup();
+    }
+
+    for (let i = this.powerups.length - 1; i >= 0; i--) {
+      const p = this.powerups[i];
+      p.timer--;
+      if (p.timer <= 0) this.powerups.splice(i, 1);
+    }
+
+    const steps = 3;
+    for (let s = 0; s < steps; s++) {
+      for (let bIdx = this.balls.length - 1; bIdx >= 0; bIdx--) {
+        const ball = this.balls[bIdx];
+
+        const currentBallSpeed = Math.hypot(ball.dx, ball.dy);
+        if (currentBallSpeed > 0.01 && currentBallSpeed < globalTargetSpeed) {
+          const speedFactor = Math.min(globalTargetSpeed, currentBallSpeed + 0.015) / currentBallSpeed;
+          ball.dx *= speedFactor;
+          ball.dy *= speedFactor;
+        }
+
+        const ballSpeedRatio = (Math.hypot(ball.dx, ball.dy) / BASE_BALL_SPEED);
+        ball.penetrationCapacity = ballSpeedRatio < 0.85 ? 1 : (ballSpeedRatio < 1.25 ? 2 : 3);
+
+        const stepDx = (ball.dx / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
+        const stepDy = (ball.dy / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
+
+        ball.x += stepDx;
+        ball.y += stepDy;
+
+        if (s === 0) {
+          this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.penetrationCapacity >= 3);
+        }
+
+        // Grid collision with stone fortification handling
+        this.physics.checkSquareCollision(
+          ball,
+          this.squares,
+          this.stoneGrid,
+          this.theme.dayColor,
+          this.theme.nightColor,
+          (i, j, b, oldColor) => {
+            const isDay = b.team === 'day';
+            const combo = isDay ? ++this.dayCombo : ++this.nightCombo;
+            this.sound.playBlockFlip(isDay, combo);
+
+            const paddle = isDay ? this.leftPaddle : this.rightPaddle;
+            paddle.energy = Math.min(100, paddle.energy + 0.8);
+
+            this.particles.addBlockSparks(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              b.reverseColor,
+              4
+            );
+          },
+          (i, j, isDestroyed) => {
+            this.sound.playStoneHit(isDestroyed);
+            this.particles.shake(isDestroyed ? 8 : 4, isDestroyed ? 5 : 2.5);
+            this.particles.addStoneDebris(
+              i * this.squareSize + this.squareSize / 2,
+              j * this.squareSize + this.squareSize / 2,
+              isDestroyed
+            );
+          }
+        );
+
+        // Wall boundary collision: Clean bounce, NO energy charge or loss!
+        this.physics.checkBoundaryCollision(ball, this.width, this.height, null);
+
+        // Paddle collision (Energy Siphon + Ball Slowdown)
+        if (this.mode !== 'sim') {
+          this.physics.checkPaddleCollision(ball, this.leftPaddle, this.rightPaddle, true, (paddle, enemyPaddle, b) => {
+            this.dayCombo = 0;
+            this.sound.playPaddleHit(false);
+            this.particles.shake(6, 3);
+            this.particles.addShockwave(paddle.x, paddle.y, this.theme.dayColor, 35);
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#FFD700', 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+          });
+
+          this.physics.checkPaddleCollision(ball, this.rightPaddle, this.leftPaddle, false, (paddle, enemyPaddle, b) => {
+            this.nightCombo = 0;
+            this.sound.playPaddleHit(false);
+            this.particles.shake(6, 3);
+            this.particles.addShockwave(paddle.x, paddle.y, this.theme.nightColor, 35);
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#7000FF', 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+          });
+        }
+
+        for (let pIdx = this.powerups.length - 1; pIdx >= 0; pIdx--) {
+          const pu = this.powerups[pIdx];
+          const dist = Math.hypot(ball.x - pu.x, ball.y - pu.y);
+          if (dist < ball.radius + pu.radius) {
+            this.applyPowerup(pu, ball);
+            this.powerups.splice(pIdx, 1);
+          }
+        }
+
+        if (ball.isExtra) {
+          ball.lifetime--;
+          if (ball.lifetime <= 0) this.balls.splice(bIdx, 1);
+        }
+
+        this.physics.applyRandomness(ball, 3, 14);
+      }
+    }
+
+    this.calculateTerritory();
+    this.particles.update();
+  }
+
+  endGame() {
+    this.state = 'gameover';
+    const dayWon = this.dayScore >= this.nightScore;
+    this.sound.playVictory(dayWon);
+    this.particles.shake(20, 10);
+    this.particles.addShockwave(this.width / 2, this.height / 2, dayWon ? this.theme.dayColor : this.theme.nightColor, 200);
+  }
+
+  draw() {
+    this.ctx.save();
+    
+    if (this.particles.shakeDuration > 0) {
+      this.ctx.translate(this.particles.shakeOffsetX, this.particles.shakeOffsetY);
+    }
+
+    this.ctx.clearRect(0, 0, this.width, this.height);
+
+    // 1. Draw Grid Squares
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        this.ctx.fillStyle = this.squares[i][j];
+        this.ctx.fillRect(i * this.squareSize, j * this.squareSize, this.squareSize, this.squareSize);
+
+        const stone = this.stoneGrid[i] ? this.stoneGrid[i][j] : null;
+        if (stone) {
+          this.ctx.save();
+          this.ctx.strokeStyle = '#4A5568';
+          this.ctx.lineWidth = 2.5;
+          this.ctx.strokeRect(i * this.squareSize + 1.5, j * this.squareSize + 1.5, this.squareSize - 3, this.squareSize - 3);
+
+          this.ctx.fillStyle = '#4A5568';
+          this.ctx.beginPath();
+          this.ctx.arc(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2, 2.5, 0, Math.PI * 2);
+          this.ctx.fill();
+
+          if (stone.hp === 1) {
+            this.ctx.strokeStyle = '#E2E8F0';
+            this.ctx.lineWidth = 1.5;
+            this.ctx.beginPath();
+            this.ctx.moveTo(i * this.squareSize + 4, j * this.squareSize + 4);
+            this.ctx.lineTo(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2);
+            this.ctx.lineTo(i * this.squareSize + this.squareSize - 4, j * this.squareSize + this.squareSize - 4);
+            this.ctx.moveTo(i * this.squareSize + this.squareSize - 5, j * this.squareSize + 5);
+            this.ctx.lineTo(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2);
+            this.ctx.stroke();
+          }
+          this.ctx.restore();
+        }
+      }
+    }
+
+    // Grid lines
+    this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
+    this.ctx.lineWidth = 1;
+    for (let i = 0; i <= this.gridX; i++) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(i * this.squareSize, 0);
+      this.ctx.lineTo(i * this.squareSize, this.height);
+      this.ctx.stroke();
+    }
+    for (let j = 0; j <= this.gridY; j++) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, j * this.squareSize);
+      this.ctx.lineTo(this.width, j * this.squareSize);
+      this.ctx.stroke();
+    }
+
+    // 2. Draw Vector Power-Ups
+    this.powerups.forEach(p => {
+      this.ctx.save();
+      this.ctx.translate(p.x, p.y);
+      const pulse = 1 + Math.sin(Date.now() / 150) * 0.12;
+      this.ctx.scale(pulse, pulse);
+
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
+      this.ctx.fillStyle = 'rgba(15, 25, 35, 0.9)';
+      this.ctx.fill();
+      this.ctx.lineWidth = 2;
+      this.ctx.strokeStyle = p.type === 'petrify' ? '#A0AEC0' : '#FFD700';
+      this.ctx.stroke();
+
+      this.ctx.strokeStyle = '#FFFFFF';
+      this.ctx.fillStyle = '#FFFFFF';
+      this.ctx.lineWidth = 1.5;
+
+      if (p.type === 'petrify') {
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, -6);
+        this.ctx.lineTo(5, -3);
+        this.ctx.lineTo(5, 2);
+        this.ctx.lineTo(0, 6);
+        this.ctx.lineTo(-5, 2);
+        this.ctx.lineTo(-5, -3);
+        this.ctx.closePath();
+        this.ctx.stroke();
+        this.ctx.fillStyle = '#A0AEC0';
+        this.ctx.fill();
+      } else if (p.type === 'bomb') {
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, 4, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.beginPath();
+        this.ctx.moveTo(-7, 0); this.ctx.lineTo(7, 0);
+        this.ctx.moveTo(0, -7); this.ctx.lineTo(0, 7);
+        this.ctx.stroke();
+      } else if (p.type === 'multiball') {
+        this.ctx.beginPath();
+        this.ctx.arc(-3.5, 2, 2, 0, Math.PI * 2);
+        this.ctx.arc(3.5, 2, 2, 0, Math.PI * 2);
+        this.ctx.arc(0, -3.5, 2, 0, Math.PI * 2);
+        this.ctx.fill();
+      } else if (p.type === 'freeze') {
+        for (let a = 0; a < 3; a++) {
+          this.ctx.save();
+          this.ctx.rotate(a * Math.PI / 3);
+          this.ctx.beginPath();
+          this.ctx.moveTo(-5, 0); this.ctx.lineTo(5, 0);
+          this.ctx.stroke();
+          this.ctx.restore();
+        }
+      } else if (p.type === 'speed') {
+        this.ctx.beginPath();
+        this.ctx.moveTo(-1, -5);
+        this.ctx.lineTo(3, -1);
+        this.ctx.lineTo(0, 0);
+        this.ctx.lineTo(2, 5);
+        this.ctx.lineTo(-3, 1);
+        this.ctx.lineTo(-0.5, 0);
+        this.ctx.closePath();
+        this.ctx.fill();
+      }
+
+      this.ctx.restore();
+    });
+
+    // 3. Draw Paddles
+    if (this.mode !== 'sim') {
+      [this.leftPaddle, this.rightPaddle].forEach(p => {
+        this.ctx.save();
+        
+        if (p.frozenTimer > 0) {
+          this.ctx.shadowColor = '#00E5FF';
+          this.ctx.shadowBlur = 12;
+        } else if (p.energy >= 100) {
+          this.ctx.shadowColor = '#FFC801';
+          this.ctx.shadowBlur = 18;
+        }
+
+        this.ctx.fillStyle = p.frozenTimer > 0 ? '#00E5FF' : (p.isLeft ? this.theme.dayBall : this.theme.nightBall);
+        
+        const rx = p.x - p.width / 2;
+        const ry = p.y - p.height / 2;
+        const radius = p.width / 2;
+
+        this.ctx.beginPath();
+        this.ctx.roundRect(rx, ry, p.width, p.height, radius);
+        this.ctx.fill();
+
+        // Laser Core when ready
+        if (p.energy >= 100) {
+          this.ctx.fillStyle = '#FFFFFF';
+          this.ctx.beginPath();
+          this.ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+          this.ctx.fill();
+
+          this.ctx.strokeStyle = 'rgba(255, 200, 1, 0.25)';
+          this.ctx.setLineDash([4, 4]);
+          this.ctx.lineWidth = 1;
+          this.ctx.beginPath();
+          this.ctx.moveTo(p.x, p.y);
+          this.ctx.lineTo(p.isLeft ? this.width : 0, p.y);
+          this.ctx.stroke();
+          this.ctx.setLineDash([]);
+        }
+
+        this.ctx.restore();
+      });
+    }
+
+    // 4. Draw Lasers & Particles
+    this.particles.draw(this.ctx, this.width);
+
+    // 5. Draw Distinct Black & White Balls
+    this.balls.forEach(ball => {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+
+      const isDayBall = ball.team === 'day';
+      const actualBallColor = isDayBall ? '#141414' : '#FFFFFF';
+
+      if (ball.penetrationCapacity >= 3) {
+        this.ctx.shadowColor = isDayBall ? '#000000' : '#FFFFFF';
+        this.ctx.shadowBlur = 16;
+        this.ctx.strokeStyle = isDayBall ? '#4A5568' : '#00F0FF';
+        this.ctx.lineWidth = 2;
+        this.ctx.stroke();
+      } else {
+        this.ctx.shadowColor = 'rgba(0,0,0,0.4)';
+        this.ctx.shadowBlur = 6;
+      }
+
+      this.ctx.fillStyle = actualBallColor;
+      this.ctx.fill();
+      this.ctx.closePath();
+
+      this.ctx.beginPath();
+      this.ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.25, 0, Math.PI * 2);
+      this.ctx.fillStyle = isDayBall ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)';
+      this.ctx.fill();
+
+      this.ctx.restore();
+    });
+
+    this.ctx.restore();
+  }
+}
+
+window.PongWarsGame = PongWarsGame;
+window.THEMES = THEMES;
