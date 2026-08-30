@@ -2,10 +2,12 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Pong Wars 1v1 - 昼夜领地对决</title>
-  <meta name="description" content="基于经典 Pong Wars 演化的 1v1 实时领地争夺竞技游戏。支持双人同屏对战、智能 AI 挑战与原版禅意观战模式。" />
+  <meta name="description" content="基于经典 Pong Wars 演化的 1v1 实时领地争夺竞技游戏。支持局域网联机对战、双人同屏对战、智能 AI 挑战与原版禅意观战模式。" />
   <link rel="stylesheet" href="style.css" />
+  <!-- WebRTC P2P Signaling Broker -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
 
@@ -42,6 +44,11 @@
     </div>
   </header>
 
+  <!-- Side Assignment Announcement Banner -->
+  <div id="sideAnnouncement" class="side-announcement">
+    <span id="sideAnnouncementText">⚔️ 对决开始！你是【☀️ 昼方 · 左侧挡板】</span>
+  </div>
+
   <!-- Main Game Wrapper -->
   <main class="main-wrapper">
 
@@ -61,6 +68,16 @@
           <line x1="1" y1="14" x2="4" y2="14"></line>
         </svg>
         <span>人机对战 (PVE)</span>
+      </button>
+
+      <button class="mode-btn" data-mode="lan">
+        <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+          <line x1="6" y1="6" x2="6.01" y2="6"></line>
+          <line x1="6" y1="18" x2="6.01" y2="18"></line>
+        </svg>
+        <span>局域网联机 (LAN)</span>
       </button>
 
       <button class="mode-btn" data-mode="pvp">
@@ -93,7 +110,7 @@
     <!-- HUD Card -->
     <div class="hud-card">
       <div class="hud-top">
-        <div class="team-hud">
+        <div class="team-hud" id="dayTeamHud">
           <div class="team-badge-icon day-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#FFC801" stroke-width="2">
               <circle cx="12" cy="12" r="5" fill="#FFC801"></circle>
@@ -108,7 +125,7 @@
             </svg>
           </div>
           <div class="team-meta">
-            <span class="team-title">昼方 · 曜石黑球</span>
+            <span class="team-title">昼方 · 曜石黑球 <span class="you-tag" id="dayYouTag">YOU</span></span>
             <span class="team-score day-text" id="dayScore">288</span>
           </div>
         </div>
@@ -118,14 +135,14 @@
           <div class="speed-tier-badge" id="speedTierBadge">速度 0.5x · 连破 1格</div>
         </div>
 
-        <div class="team-hud" style="flex-direction: row-reverse; text-align: right;">
+        <div class="team-hud" id="nightTeamHud" style="flex-direction: row-reverse; text-align: right;">
           <div class="team-badge-icon night-icon">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="#7000FF" stroke="#A78BFA" stroke-width="1.5">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           </div>
           <div class="team-meta">
-            <span class="team-title">夜方 · 纯白光球</span>
+            <span class="team-title">夜方 · 纯白光球 <span class="you-tag" id="nightYouTag">YOU</span></span>
             <span class="team-score night-text" id="nightScore">288</span>
           </div>
         </div>
@@ -172,7 +189,7 @@
           <circle cx="12" cy="12" r="4"></circle>
           <path d="M12 2v3m0 14v3M2 12h3m14 0h3"></path>
         </svg>
-        <span>P1 耀斑 (E)</span>
+        <span id="p1SkillBtnText">普技 (E)</span>
         <span class="cd-tag" id="p1CDTag">READY</span>
       </button>
 
@@ -181,14 +198,14 @@
           <line x1="2" y1="12" x2="22" y2="12" stroke-width="3"></line>
           <polyline points="15 6 22 12 15 18"></polyline>
         </svg>
-        <span>P1 3行激光 (Space)</span>
+        <span id="p1LaserBtnText">3行激光 (Space)</span>
       </button>
 
       <button class="action-btn" id="p2SkillBtn">
         <svg class="svg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
         </svg>
-        <span>P2 月蚀 (Shift)</span>
+        <span id="p2SkillBtnText">普技 (Shift)</span>
         <span class="cd-tag" id="p2CDTag">READY</span>
       </button>
 
@@ -197,7 +214,7 @@
           <line x1="22" y1="12" x2="2" y2="12" stroke-width="3"></line>
           <polyline points="9 6 2 12 9 18"></polyline>
         </svg>
-        <span>P2 3行激光 (Enter)</span>
+        <span id="p2LaserBtnText">3行激光 (Enter)</span>
       </button>
     </div>
 
@@ -268,6 +285,46 @@
 
   </main>
 
+  <!-- LAN Multiplayer Room Modal -->
+  <div class="modal-overlay" id="lanModal">
+    <div class="modal-card">
+      <div class="modal-header-row">
+        <h2 class="modal-title">局域网 / 跨设备对战</h2>
+        <button class="close-modal-btn" id="closeLanModalBtn">&times;</button>
+      </div>
+      <p class="modal-sub">支持手机与电脑同一局域网（或外网）直接对战，开局阵营随机分配！</p>
+
+      <div class="lan-options-grid">
+        <div class="lan-card">
+          <h4>创建房间 (Host)</h4>
+          <p>成为房主，生成 4 位房间码让对手加入</p>
+          <button class="btn-primary" id="createRoomBtn" style="width: 100%; justify-content: center; margin-top: 10px;">创建房间</button>
+          <div id="roomCodeDisplay" class="room-code-box" style="display: none;">
+            <span>房间码：</span>
+            <strong id="myRoomCode">----</strong>
+            <button class="btn-icon" id="copyCodeBtn" title="复制房间码">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="lan-card">
+          <h4>加入房间 (Join)</h4>
+          <p>输入房主的 4 位房间码加入对战</p>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <input type="text" id="joinCodeInput" maxlength="4" placeholder="4位房间码" class="code-input" />
+            <button class="btn-primary" id="joinRoomBtn">加入</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="lanStatus" class="lan-status-msg"></div>
+    </div>
+  </div>
+
   <!-- Help & Guide Modal -->
   <div class="modal-overlay" id="helpModal">
     <div class="modal-card">
@@ -275,42 +332,30 @@
         <h2 class="modal-title">玩法与机制说明</h2>
         <button class="close-modal-btn" id="closeHelpModalIconBtn">&times;</button>
       </div>
-      <p class="modal-sub">挡板接球偷取能量并减速敌球；当敌方释放大招时，移动挡板格挡可保护后方领地并吸收回复 +30% 大招充能！</p>
+      <p class="modal-sub">支持手机端平滑拖拽触控；局域网联机开局自动随机分配阵营并提示【你是哪一方】！</p>
 
       <div class="guide-section">
-        <h4 class="guide-title">按键操作</h4>
+        <h4 class="guide-title">控制与操作方式</h4>
         <div class="guide-row">
-          <span>玩家 1 (昼方 / 左侧)</span>
-          <span><span class="key-badge">W</span> / <span class="key-badge">S</span> 移动</span>
+          <span>📱 手机 / 平板触控</span>
+          <span>在屏幕任意位置<strong>单指上下拖动</strong>直接控制挡板</span>
         </div>
         <div class="guide-row">
-          <span>P1 普技 (耀斑 / 5s CD)</span>
-          <span><span class="key-badge">E</span> (随机打击敌方领地)</span>
+          <span>💻 电脑键盘 (P1 昼方)</span>
+          <span><span class="key-badge">W</span>/<span class="key-badge">S</span> 移动，<span class="key-badge">E</span> 耀斑，<span class="key-badge">Space</span> 激光</span>
         </div>
         <div class="guide-row">
-          <span>P1 终极大招 (3行激光)</span>
-          <span><span class="key-badge">Space</span> (挡板高度发射)</span>
-        </div>
-        <hr class="guide-divider" />
-        <div class="guide-row">
-          <span>玩家 2 (夜方 / 右侧)</span>
-          <span><span class="key-badge">↑</span> / <span class="key-badge">↓</span> 移动</span>
-        </div>
-        <div class="guide-row">
-          <span>P2 普技 (月蚀 / 5s CD)</span>
-          <span><span class="key-badge">Right Shift</span> (随机打击昼方领地)</span>
-        </div>
-        <div class="guide-row">
-          <span>P2 终极大招 (3行激光)</span>
-          <span><span class="key-badge">Enter</span> (挡板高度发射)</span>
+          <span>💻 电脑键盘 (P2 夜方)</span>
+          <span><span class="key-badge">↑</span>/<span class="key-badge">↓</span> 移动，<span class="key-badge">Shift</span> 月蚀，<span class="key-badge">Enter</span> 激光</span>
         </div>
       </div>
 
       <div class="guide-section">
-        <h4 class="guide-title">大招格挡与博弈机制</h4>
-        <p>• <strong>大招激光格挡与保护</strong>：敌方发射激光时，我方挡板移至激光路径可强行拦截，<strong>完全保护挡板后方领地不被转化</strong>，同时吸收高能<strong>回复 +30% 大招充能</strong>！</p>
-        <p>• <strong>接球能量偷取与减速</strong>：接住小球时偷取敌方 4% 能量、充能己方 6%，并使球速降低 25%。速度越慢，连破数越少（最低 1 格）。</p>
-        <p>• <strong>5 格石化要塞道具</strong>：拾取后在敌方领地生成 5 个己方 2 层护甲石化方块。低速需击打 2 次夺回；高速（3连破）只需 1 次，但该击消耗全部穿透动能（强制变为 1 破并反弹）。</p>
+        <h4 class="guide-title">核心战术机制</h4>
+        <p>• <strong>身份识别</strong>：开局大横幅提示您的阵营，HUD 战况栏常驻 <code>[YOU]</code> 徽章，己方挡板旁带有黄色发光指示箭头。</p>
+        <p>• <strong>大招激光格挡与反充</strong>：敌方激光命中我方挡板时被阻断，保护后方方块不被转化，同时我方吸收回复 <strong>+30% 大招充能</strong>！</p>
+        <p>• <strong>接球能量偷取与减速</strong>：接球偷取敌方 4% 能量、充能己方 6% 并减速敌球 25%（速度越慢连破格数越少）。</p>
+        <p>• <strong>5 格石化要塞道具</strong>：在敌方领地生成 5 格 2 层石化护甲领地，低速需击打 2 次，高速 1 击破除但消耗当次穿透动能。</p>
       </div>
 
       <button class="btn-primary" id="closeHelpBtn" style="padding: 10px; width: 100%; justify-content: center;">确认开始对决</button>
@@ -338,7 +383,7 @@
   <!-- Footer -->
   <footer>
     <p>
-      致敬原创 <strong>Pong Wars</strong> by <a href="https://koenvangilst.nl/labs/pong-wars" target="_blank">Koen van Gilst</a> & <a href="https://x.com/denicmarko" target="_blank">Marko Denic</a> | 1v1 Battle Edition
+      致敬原创 <strong>Pong Wars</strong> by <a href="https://koenvangilst.nl/labs/pong-wars" target="_blank">Koen van Gilst</a> & <a href="https://x.com/denicmarko" target="_blank">Marko Denic</a> | 1v1 LAN Battle Edition
     </p>
   </footer>
 
@@ -347,6 +392,7 @@
   <script src="js/particles.js"></script>
   <script src="js/physics.js"></script>
   <script src="js/ai.js"></script>
+  <script src="js/network.js"></script>
   <script src="js/game.js"></script>
   <script src="js/main.js"></script>
 </body>

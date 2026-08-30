@@ -20,6 +20,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const timerDisplay = document.getElementById('timerDisplay');
   const speedTierBadge = document.getElementById('speedTierBadge');
   
+  const dayYouTag = document.getElementById('dayYouTag');
+  const nightYouTag = document.getElementById('nightYouTag');
+  const sideAnnouncement = document.getElementById('sideAnnouncement');
+  const sideAnnouncementText = document.getElementById('sideAnnouncementText');
+
   const p1EnergyFill = document.getElementById('p1EnergyFill');
   const p2EnergyFill = document.getElementById('p2EnergyFill');
   const p1EnergyPct = document.getElementById('p1EnergyPct');
@@ -34,6 +39,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const mobileControls = document.getElementById('mobileControls');
 
   // Modals & Panels
+  const lanModal = document.getElementById('lanModal');
+  const closeLanModalBtn = document.getElementById('closeLanModalBtn');
+  const createRoomBtn = document.getElementById('createRoomBtn');
+  const joinRoomBtn = document.getElementById('joinRoomBtn');
+  const joinCodeInput = document.getElementById('joinCodeInput');
+  const roomCodeDisplay = document.getElementById('roomCodeDisplay');
+  const myRoomCode = document.getElementById('myRoomCode');
+  const copyCodeBtn = document.getElementById('copyCodeBtn');
+  const lanStatus = document.getElementById('lanStatus');
+
   const gameOverModal = document.getElementById('gameOverModal');
   const winnerTitle = document.getElementById('winnerTitle');
   const winnerSub = document.getElementById('winnerSub');
@@ -56,6 +71,40 @@ document.addEventListener('DOMContentLoaded', () => {
   const modeButtons = document.querySelectorAll('.mode-btn');
   const timeLimitSelect = document.getElementById('timeLimitSelect');
   const gridSizeSelect = document.getElementById('gridSizeSelect');
+
+  // Side Announcement Display
+  function showSideAnnouncement(side) {
+    const isDay = side === 'day';
+    sideAnnouncementText.textContent = isDay 
+      ? '⚔️ 对决开始！你是【☀️ 昼方 · 左侧挡板】（曜石黑球）'
+      : '⚔️ 对决开始！你是【🌙 夜方 · 右侧挡板】（纯白光球）';
+    sideAnnouncement.classList.add('show');
+
+    // Update HUD YOU tag
+    if (dayYouTag) dayYouTag.classList.toggle('active', isDay);
+    if (nightYouTag) nightYouTag.classList.toggle('active', !isDay);
+
+    // Haptic vibration on mobile
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+
+    setTimeout(() => {
+      sideAnnouncement.classList.remove('show');
+    }, 2800);
+  }
+
+  // Network Callbacks
+  game.network.onStatusChange = (status, msg) => {
+    if (lanStatus) lanStatus.textContent = msg;
+    if (status === 'connected') {
+      setTimeout(() => {
+        lanModal.classList.remove('show');
+      }, 600);
+    }
+  };
+
+  game.network.onSideAssigned = (side) => {
+    showSideAnnouncement(side);
+  };
 
   // Aggressive Web Audio Autoplay Unlock
   const unlockAudio = () => {
@@ -86,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
       game.pause();
       updatePauseUI();
     } else if (e.code === 'KeyR') {
-      startNewGame();
+      if (game.mode !== 'lan') startNewGame();
     }
   });
 
@@ -123,10 +172,25 @@ document.addEventListener('DOMContentLoaded', () => {
       const tx = (touch.clientX - rect.left) * scaleX;
       const ty = (touch.clientY - rect.top) * scaleY;
 
-      if (tx < canvas.width / 2) {
+      if (game.mode === 'lan') {
+        // LAN Mode: Dragging anywhere moves YOUR assigned paddle!
+        if (game.playerSide === 'day') {
+          game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+          game.network.sendPaddleInput(game.leftPaddle.y, 0);
+        } else {
+          game.rightPaddle.y = Math.max(game.rightPaddle.height / 2, Math.min(canvas.height - game.rightPaddle.height / 2, ty));
+          game.network.sendPaddleInput(game.rightPaddle.y, 0);
+        }
+      } else if (game.mode === 'pve') {
+        // PVE: Player controls left paddle
         game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
       } else if (game.mode === 'pvp') {
-        game.rightPaddle.y = Math.max(game.rightPaddle.height / 2, Math.min(canvas.height - game.rightPaddle.height / 2, ty));
+        // PVP Local: Left half controls left, Right half controls right
+        if (tx < canvas.width / 2) {
+          game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+        } else {
+          game.rightPaddle.y = Math.max(game.rightPaddle.height / 2, Math.min(canvas.height - game.rightPaddle.height / 2, ty));
+        }
       }
     }
   }
@@ -150,31 +214,54 @@ document.addEventListener('DOMContentLoaded', () => {
     const rect = canvas.getBoundingClientRect();
     const scaleY = canvas.height / rect.height;
     const ty = (e.clientY - rect.top) * scaleY;
-    game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+
+    if (game.mode === 'lan') {
+      if (game.playerSide === 'day') {
+        game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+        game.network.sendPaddleInput(game.leftPaddle.y, 0);
+      } else {
+        game.rightPaddle.y = Math.max(game.rightPaddle.height / 2, Math.min(canvas.height - game.rightPaddle.height / 2, ty));
+        game.network.sendPaddleInput(game.rightPaddle.y, 0);
+      }
+    } else {
+      game.leftPaddle.y = Math.max(game.leftPaddle.height / 2, Math.min(canvas.height - game.leftPaddle.height / 2, ty));
+    }
   }
 
-  // Button actions
+  // Mobile Action Button Handlers
   if (p1SkillBtn) {
     p1SkillBtn.addEventListener('click', () => {
       unlockAudio();
-      game.activateSolarFlare();
+      if (navigator.vibrate) navigator.vibrate(20);
+      if (game.mode === 'lan' && game.playerSide === 'night') {
+        game.activateEclipse();
+      } else {
+        game.activateSolarFlare();
+      }
     });
   }
   if (p2SkillBtn) {
     p2SkillBtn.addEventListener('click', () => {
       unlockAudio();
+      if (navigator.vibrate) navigator.vibrate(20);
       game.activateEclipse();
     });
   }
   if (p1LaserBtn) {
     p1LaserBtn.addEventListener('click', () => {
       unlockAudio();
-      game.activateLaser(true);
+      if (navigator.vibrate) navigator.vibrate(40);
+      if (game.mode === 'lan' && game.playerSide === 'night') {
+        game.activateLaser(false);
+      } else {
+        game.activateLaser(true);
+      }
     });
   }
   if (p2LaserBtn) {
     p2LaserBtn.addEventListener('click', () => {
       unlockAudio();
+      if (navigator.vibrate) navigator.vibrate(40);
       game.activateLaser(false);
     });
   }
@@ -188,23 +275,81 @@ document.addEventListener('DOMContentLoaded', () => {
       const mode = btn.dataset.mode;
       game.setMode(mode);
       
-      if (mode === 'sim') {
+      if (mode === 'lan') {
+        lanModal.classList.add('show');
+        simSpeedGroup.style.display = 'none';
+        aiDiffGroup.style.display = 'none';
+        if (mobileControls) mobileControls.style.display = 'grid';
+      } else if (mode === 'sim') {
         simSpeedGroup.style.display = 'flex';
         aiDiffGroup.style.display = 'none';
         if (mobileControls) mobileControls.style.display = 'none';
+        startNewGame();
       } else if (mode === 'pve') {
         simSpeedGroup.style.display = 'none';
         aiDiffGroup.style.display = 'flex';
         if (mobileControls) mobileControls.style.display = 'grid';
+        if (dayYouTag) dayYouTag.classList.add('active');
+        if (nightYouTag) nightYouTag.classList.remove('active');
+        startNewGame();
       } else {
         simSpeedGroup.style.display = 'none';
         aiDiffGroup.style.display = 'none';
         if (mobileControls) mobileControls.style.display = 'grid';
+        if (dayYouTag) dayYouTag.classList.remove('active');
+        if (nightYouTag) nightYouTag.classList.remove('active');
+        startNewGame();
       }
-
-      startNewGame();
     });
   });
+
+  // LAN Modal Actions
+  if (closeLanModalBtn) {
+    closeLanModalBtn.addEventListener('click', () => {
+      lanModal.classList.remove('show');
+    });
+  }
+
+  if (createRoomBtn) {
+    createRoomBtn.addEventListener('click', () => {
+      unlockAudio();
+      createRoomBtn.disabled = true;
+      lanStatus.textContent = '正在初始化房间...';
+      game.network.createRoom(null, (err, code) => {
+        createRoomBtn.disabled = false;
+        if (!err) {
+          myRoomCode.textContent = code;
+          roomCodeDisplay.style.display = 'flex';
+        }
+      });
+    });
+  }
+
+  if (joinRoomBtn) {
+    joinRoomBtn.addEventListener('click', () => {
+      unlockAudio();
+      const code = joinCodeInput.value.trim();
+      if (!code || code.length !== 4) {
+        lanStatus.textContent = '请输入正确的4位数字房间码！';
+        return;
+      }
+      joinRoomBtn.disabled = true;
+      game.network.joinRoom(code, (err) => {
+        joinRoomBtn.disabled = false;
+      });
+    });
+  }
+
+  if (copyCodeBtn) {
+    copyCodeBtn.addEventListener('click', () => {
+      const code = myRoomCode.textContent;
+      if (code && code !== '----') {
+        navigator.clipboard.writeText(code).then(() => {
+          lanStatus.textContent = '房间码已复制到剪贴板！发给朋友即可对战。';
+        }).catch(() => {});
+      }
+    });
+  }
 
   // AI Difficulty
   aiDiffSelect.addEventListener('change', (e) => {
@@ -225,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
     game.gridY = Math.floor(game.height / size);
     game.physics = new PhysicsEngine(game.gridX, game.gridY, size);
     game.totalSquares = game.gridX * game.gridY;
-    startNewGame();
+    if (game.mode !== 'lan') startNewGame();
   });
 
   // Theme
@@ -284,6 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   window.addEventListener('click', (e) => {
     if (e.target === helpModal) helpModal.classList.remove('show');
+    if (e.target === lanModal) lanModal.classList.remove('show');
   });
 
   // Pause UI
@@ -300,15 +446,19 @@ document.addEventListener('DOMContentLoaded', () => {
     gameOverModal.classList.remove('show');
     game.start();
     updatePauseUI();
+    if (game.mode === 'pve') {
+      if (dayYouTag) dayYouTag.classList.add('active');
+      if (nightYouTag) nightYouTag.classList.remove('active');
+    }
   }
 
   restartBtn.addEventListener('click', () => {
     unlockAudio();
-    startNewGame();
+    if (game.mode !== 'lan') startNewGame();
   });
   modalRestartBtn.addEventListener('click', () => {
     unlockAudio();
-    startNewGame();
+    if (game.mode !== 'lan') startNewGame();
   });
 
   // Main UI update loop

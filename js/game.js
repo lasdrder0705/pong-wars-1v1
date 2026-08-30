@@ -73,11 +73,17 @@ class PongWarsGame {
     this.particles = new ParticleSystem();
     this.physics = new PhysicsEngine(this.gridX, this.gridY, this.squareSize);
     this.ai = new AIController('medium');
+    this.network = new NetworkManager(this);
 
     this.currentThemeKey = options.theme || 'classic';
     this.theme = THEMES[this.currentThemeKey];
-    this.mode = options.mode || 'pve';
+    this.mode = options.mode || 'pve'; // 'pve', 'pvp', 'sim', 'lan'
     this.state = 'idle';
+    
+    // Online LAN Properties
+    this.isOnline = false;
+    this.isHost = false;
+    this.playerSide = 'day'; // 'day' (left) or 'night' (right)
     
     this.timeLimit = options.timeLimit || 90;
     this.timeLeft = this.timeLimit;
@@ -150,6 +156,10 @@ class PongWarsGame {
 
   setMode(mode) {
     this.mode = mode;
+    if (mode !== 'lan') {
+      this.isOnline = false;
+      this.network.disconnect();
+    }
     this.reset();
   }
 
@@ -232,9 +242,13 @@ class PongWarsGame {
   }
 
   // Normal Skill: Solar Flare
-  activateSolarFlare() {
+  activateSolarFlare(isRemote = false) {
     if (this.p1SkillCD > 0) return;
     this.p1SkillCD = 5000;
+
+    if (this.isOnline && !isRemote) {
+      this.network.sendSkillAction('day');
+    }
 
     const enemyTiles = [];
     for (let i = 0; i < this.gridX; i++) {
@@ -275,9 +289,13 @@ class PongWarsGame {
   }
 
   // Normal Skill: Eclipse
-  activateEclipse() {
+  activateEclipse(isRemote = false) {
     if (this.p2SkillCD > 0) return;
     this.p2SkillCD = 5000;
+
+    if (this.isOnline && !isRemote) {
+      this.network.sendSkillAction('night');
+    }
 
     const enemyTiles = [];
     for (let i = 0; i < this.gridX; i++) {
@@ -318,10 +336,14 @@ class PongWarsGame {
   }
 
   // Ultimate Skill: 3-Row Laser Beam with Paddle Shielding & Energy Absorption
-  activateLaser(isLeft = true) {
+  activateLaser(isLeft = true, isRemote = false) {
     const caster = isLeft ? this.leftPaddle : this.rightPaddle;
     const defender = isLeft ? this.rightPaddle : this.leftPaddle;
     if (caster.energy < 100) return;
+
+    if (this.isOnline && !isRemote) {
+      this.network.sendLaserAction(isLeft ? 'day' : 'night');
+    }
 
     caster.energy = 0;
     const targetColor = isLeft ? this.theme.dayColor : this.theme.nightColor;
@@ -337,7 +359,6 @@ class PongWarsGame {
 
     const startX = isLeft ? caster.x + caster.width / 2 : caster.x - caster.width / 2;
 
-    // Check if the defender paddle intercepts/blocks the laser
     const defTopY = defender.y - defender.height / 2;
     const defBottomY = defender.y + defender.height / 2;
     const isBlocked = (this.mode !== 'sim') && (Math.max(laserTopY, defTopY) < Math.min(laserBottomY, defBottomY));
@@ -348,10 +369,8 @@ class PongWarsGame {
     if (isBlocked) {
       targetX = isLeft ? (defender.x - defender.width / 2) : (defender.x + defender.width / 2);
       
-      // Defender absorbs energy (+30%)
       defender.energy = Math.min(100, defender.energy + 30.0);
 
-      // Sound & VFX
       this.sound.playShieldAbsorb();
       this.particles.shake(14, 6);
       this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#7000FF') : (this.theme.dayAccent || '#FFD700'), 25);
@@ -362,7 +381,6 @@ class PongWarsGame {
 
     this.particles.addLaserBeam(startX, targetX, laserY, this.squareSize * 3, beamColor, 18);
 
-    // Convert blocks, protecting any blocks behind the defending paddle
     beamRows.forEach(r => {
       if (r >= 0 && r < this.gridY) {
         for (let i = 0; i < this.gridX; i++) {
@@ -490,7 +508,35 @@ class PongWarsGame {
   handleInput() {
     if (this.mode === 'sim') return;
 
-    // P1 Controls
+    // In Online LAN mode, player only controls their assigned paddle
+    if (this.isOnline) {
+      const isMyDay = this.playerSide === 'day';
+      const myPaddle = isMyDay ? this.leftPaddle : this.rightPaddle;
+      const mySpeed = myPaddle.frozenTimer > 0 ? myPaddle.speed * 0.45 : myPaddle.speed;
+      myPaddle.vy = 0;
+
+      if (this.keys['KeyW'] || this.keys['w'] || this.keys['W'] || this.keys['ArrowUp']) {
+        myPaddle.y -= mySpeed;
+        myPaddle.vy = -mySpeed;
+      }
+      if (this.keys['KeyS'] || this.keys['s'] || this.keys['S'] || this.keys['ArrowDown']) {
+        myPaddle.y += mySpeed;
+        myPaddle.vy = mySpeed;
+      }
+      if (this.keys['KeyE'] || this.keys['e'] || this.keys['E'] || this.keys['ShiftRight'] || this.keys['Slash']) {
+        if (isMyDay) this.activateSolarFlare();
+        else this.activateEclipse();
+      }
+      if (this.keys['Space'] || this.keys[' '] || this.keys['Enter'] || this.keys['NumpadEnter']) {
+        this.activateLaser(isMyDay);
+      }
+
+      myPaddle.y = Math.max(myPaddle.height / 2, Math.min(this.height - myPaddle.height / 2, myPaddle.y));
+      this.network.sendPaddleInput(myPaddle.y, myPaddle.vy);
+      return;
+    }
+
+    // P1 Controls (Local)
     const p1Speed = this.leftPaddle.frozenTimer > 0 ? this.leftPaddle.speed * 0.45 : this.leftPaddle.speed;
     this.leftPaddle.vy = 0;
     if (this.keys['KeyW'] || this.keys['w'] || this.keys['W']) {
@@ -508,7 +554,7 @@ class PongWarsGame {
       this.activateLaser(true);
     }
 
-    // P2 Controls
+    // P2 Controls (Local PVP)
     if (this.mode === 'pvp') {
       const p2Speed = this.rightPaddle.frozenTimer > 0 ? this.rightPaddle.speed * 0.45 : this.rightPaddle.speed;
       this.rightPaddle.vy = 0;
@@ -606,7 +652,6 @@ class PongWarsGame {
           this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.penetrationCapacity >= 3);
         }
 
-        // Grid collision with stone fortification handling
         this.physics.checkSquareCollision(
           ball,
           this.squares,
@@ -639,10 +684,8 @@ class PongWarsGame {
           }
         );
 
-        // Wall boundary collision: Clean bounce, NO energy charge or loss!
-        this.physics.checkBoundaryCollision(ball, this.width, this.height, null);
+        this.physics.checkBoundaryCollision(ball, this.width, this.height);
 
-        // Paddle collision (Energy Siphon + Ball Slowdown)
         if (this.mode !== 'sim') {
           this.physics.checkPaddleCollision(ball, this.leftPaddle, this.rightPaddle, true, (paddle, enemyPaddle, b) => {
             this.dayCombo = 0;
@@ -821,7 +864,7 @@ class PongWarsGame {
       this.ctx.restore();
     });
 
-    // 3. Draw Paddles
+    // 3. Draw Paddles & Player Side Pointers
     if (this.mode !== 'sim') {
       [this.leftPaddle, this.rightPaddle].forEach(p => {
         this.ctx.save();
@@ -859,6 +902,33 @@ class PongWarsGame {
           this.ctx.lineTo(p.isLeft ? this.width : 0, p.y);
           this.ctx.stroke();
           this.ctx.setLineDash([]);
+        }
+
+        // Draw "YOU" Pointer if this is the player's controlled paddle!
+        const isMyPaddle = (this.mode === 'pve' && p.isLeft) ||
+                           (this.mode === 'lan' && ((this.playerSide === 'day' && p.isLeft) || (this.playerSide === 'night' && !p.isLeft)));
+
+        if (isMyPaddle) {
+          const pointerX = p.isLeft ? p.x + 22 : p.x - 22;
+          const arrowDir = p.isLeft ? -1 : 1;
+          const floatOffset = Math.sin(Date.now() / 200) * 3;
+
+          this.ctx.fillStyle = '#FFD700';
+          this.ctx.shadowColor = '#FFD700';
+          this.ctx.shadowBlur = 8;
+          
+          // Draw mini pointer arrow
+          this.ctx.beginPath();
+          this.ctx.moveTo(pointerX + (arrowDir * floatOffset), p.y);
+          this.ctx.lineTo(pointerX + (arrowDir * (floatOffset + 8)), p.y - 5);
+          this.ctx.lineTo(pointerX + (arrowDir * (floatOffset + 8)), p.y + 5);
+          this.ctx.closePath();
+          this.ctx.fill();
+
+          // Small "YOU" badge
+          this.ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
+          this.ctx.textAlign = p.isLeft ? 'left' : 'right';
+          this.ctx.fillText("YOU", pointerX + (arrowDir > 0 ? -12 : 12), p.y + 3.5);
         }
 
         this.ctx.restore();
