@@ -1,5 +1,5 @@
 /**
- * Particle and Visual Effects System for Pong Wars 1v1
+ * 昼夜领地对战 V1.0 Particle and Visual Effects System
  * Pure visual particle effects without text clutter
  */
 class ParticleSystem {
@@ -16,8 +16,8 @@ class ParticleSystem {
     this.shakeOffsetY = 0;
   }
 
-  // Trigger screen shake
-  shake(duration = 10, intensity = 6) {
+  // Trigger screen shake (gentle and subtle)
+  shake(duration = 5, intensity = 2) {
     this.shakeDuration = duration;
     this.shakeIntensity = intensity;
   }
@@ -179,8 +179,8 @@ class ParticleSystem {
 
   update() {
     if (this.shakeDuration > 0) {
-      this.shakeOffsetX = (Math.random() - 0.5) * this.shakeIntensity * 2;
-      this.shakeOffsetY = (Math.random() - 0.5) * this.shakeIntensity * 2;
+      this.shakeOffsetX = (Math.random() - 0.5) * this.shakeIntensity;
+      this.shakeOffsetY = (Math.random() - 0.5) * this.shakeIntensity;
       this.shakeDuration--;
     } else {
       this.shakeOffsetX = 0;

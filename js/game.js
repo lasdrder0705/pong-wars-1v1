@@ -300,7 +300,7 @@ class PongWarsGame {
     const target = enemyTiles[Math.floor(Math.random() * enemyTiles.length)];
 
     this.sound.playSkill('solar');
-    this.particles.shake(10, 5);
+    this.particles.shake(4, 1.5);
 
     const radius = 1.5;
     for (let i = target.i - 2; i <= target.i + 2; i++) {
@@ -349,7 +349,7 @@ class PongWarsGame {
     const target = enemyTiles[Math.floor(Math.random() * enemyTiles.length)];
 
     this.sound.playSkill('eclipse');
-    this.particles.shake(10, 5);
+    this.particles.shake(4, 1.5);
 
     const radius = 1.5;
     for (let i = target.i - 2; i <= target.i + 2; i++) {
@@ -413,11 +413,11 @@ class PongWarsGame {
       defender.energy = Math.min(100, defender.energy + 30.0);
 
       this.sound.playShieldAbsorb();
-      this.particles.shake(14, 6);
+      this.particles.shake(5, 2);
       this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#7000FF') : (this.theme.dayAccent || '#FFD700'), 25);
     } else {
       this.sound.playLaser(isLeft);
-      this.particles.shake(18, 8);
+      this.particles.shake(6, 2.5);
     }
 
     this.particles.addLaserBeam(startX, targetX, laserY, this.squareSize * 3, beamColor, 18);
@@ -469,7 +469,7 @@ class PongWarsGame {
 
     if (powerup.type === 'petrify') {
       this.sound.playSkill('petrify');
-      this.particles.shake(12, 5);
+      this.particles.shake(4, 1.5);
 
       const enemyColor = isDay ? this.theme.nightColor : this.theme.dayColor;
       const enemyTiles = [];
@@ -498,7 +498,7 @@ class PongWarsGame {
     } else if (powerup.type === 'bomb') {
       this.sound.playSkill('generic');
       this.sound.playExplosion();
-      this.particles.shake(12, 6);
+      this.particles.shake(5, 2);
       const centerI = Math.floor(powerup.x / this.squareSize);
       const centerJ = Math.floor(powerup.y / this.squareSize);
       for (let i = centerI - 2; i <= centerI + 2; i++) {
@@ -806,7 +806,7 @@ class PongWarsGame {
     this.state = 'gameover';
     const dayWon = this.dayScore >= this.nightScore;
     this.sound.playVictory(dayWon);
-    this.particles.shake(20, 10);
+    this.particles.shake(8, 3);
     this.particles.addShockwave(this.width / 2, this.height / 2, dayWon ? this.theme.dayColor : this.theme.nightColor, 200);
   }
 
