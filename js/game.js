@@ -62,6 +62,102 @@ const ALLOWED_TIME_LIMITS = new Set([0, 60, 90, 120]);
 const FIXED_STEP_MS = 1000 / 60;
 const MAX_FRAME_DELTA_MS = 250;
 
+// ===== 水墨球头 Sprite 缓存（纯视觉：墨团/光晕预渲染，逐帧复用） =====
+function _gmHexToRgb(hex) {
+  if (typeof hex !== 'string') return null;
+  const m = hex.replace('#', '');
+  if (m.length !== 6) return null;
+  const v = parseInt(m, 16);
+  return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+}
+
+function _gmSeededRand(seed) {
+  let h = seed >>> 0;
+  return function () {
+    h = (h * 1664525 + 1013904223) >>> 0;
+    return h / 4294967296;
+  };
+}
+
+const _gmBallSpriteCache = {};
+const _GM_BALL_SPRITE_SIZE = 192;
+const _GM_BALL_CORE_R = 56; // 球半径在 sprite 中占据的像素半径
+
+// isInk=true：浓墨墨团（边缘不规则晕染+颗粒）；isInk=false：发光白丸（亮核+柔光晕）
+// 返回 { canvas, scale }，绘制边长 = ball.radius * 2 * scale
+function _gmGetBallSprite(color, isInk) {
+  const key = (isInk ? 'ink|' : 'glow|') + color;
+  let entry = _gmBallSpriteCache[key];
+  if (entry) return entry;
+
+  const S = _GM_BALL_SPRITE_SIZE;
+  const C = S / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = S;
+  canvas.height = S;
+  const c = canvas.getContext('2d');
+  const rgb = _gmHexToRgb(color) || (isInk ? { r: 20, g: 20, b: 20 } : { r: 255, g: 255, b: 255 });
+  const rgba = (a) => `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`;
+  let seed = 13;
+  for (let i = 0; i < key.length; i++) seed = (seed * 31 + key.charCodeAt(i)) >>> 0;
+  const rand = _gmSeededRand(seed);
+
+  if (isInk) {
+    // 外围偏移墨晕（2 层），让边缘不再是矢量正圆
+    for (let k = 0; k < 2; k++) {
+      const ox = C + (rand() - 0.5) * _GM_BALL_CORE_R * 0.5;
+      const oy = C + (rand() - 0.5) * _GM_BALL_CORE_R * 0.5;
+      const or = _GM_BALL_CORE_R * (0.75 + rand() * 0.2);
+      const g = c.createRadialGradient(ox, oy, 0, ox, oy, or);
+      g.addColorStop(0, rgba(0.8));
+      g.addColorStop(0.6, rgba(0.5));
+      g.addColorStop(1, rgba(0));
+      c.fillStyle = g;
+      c.fillRect(0, 0, S, S);
+    }
+    // 主墨团：中心浓重饱满，向外晕开
+    const g = c.createRadialGradient(C, C, 0, C, C, _GM_BALL_CORE_R);
+    g.addColorStop(0, rgba(1));
+    g.addColorStop(0.62, rgba(0.97));
+    g.addColorStop(0.85, rgba(0.5));
+    g.addColorStop(1, rgba(0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+    // 边缘颗粒飞白
+    for (let k = 0; k < 10; k++) {
+      const ang = rand() * Math.PI * 2;
+      const d = _GM_BALL_CORE_R * (0.82 + rand() * 0.35);
+      c.globalAlpha = 0.15 + rand() * 0.3;
+      c.fillStyle = color;
+      c.beginPath();
+      c.arc(C + Math.cos(ang) * d, C + Math.sin(ang) * d, 1 + rand() * 2.2, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = 1;
+    }
+  } else {
+    // 外圈柔和辉光
+    let g = c.createRadialGradient(C, C, 0, C, C, C - 2);
+    g.addColorStop(0, rgba(0.45));
+    g.addColorStop(0.45, rgba(0.22));
+    g.addColorStop(0.75, rgba(0.07));
+    g.addColorStop(1, rgba(0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+    // 亮核：纯白中心，边缘轻微柔化
+    g = c.createRadialGradient(C, C, 0, C, C, _GM_BALL_CORE_R);
+    g.addColorStop(0, rgba(1));
+    g.addColorStop(0.72, rgba(1));
+    g.addColorStop(0.92, rgba(0.85));
+    g.addColorStop(1, rgba(0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+  }
+
+  entry = { canvas: canvas, scale: C / _GM_BALL_CORE_R };
+  _gmBallSpriteCache[key] = entry;
+  return entry;
+}
+
 class PongWarsGame {
   constructor(canvas, options = {}) {
     this.canvas = canvas;
@@ -120,6 +216,10 @@ class PongWarsGame {
     this.keys = {};
     this.simSpeed = 1.0;
     this.simulationAccumulator = 0;
+
+    // 纯视觉缓存：领地水墨纹理离屏层（增量重绘，不影响格子数据结构）
+    this._terrLayer = null;
+    this._terrColors = null;
   }
 
   createPaddle(x, isLeft) {
@@ -733,7 +833,9 @@ class PongWarsGame {
         ball.y += stepDy;
 
         if (s === 0) {
-          this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.atMaxSpeed === true);
+          // 拖尾颜色取自当前主题（黑球=dayBall 墨色，白球=nightBall 色系），纯视觉参数
+          const trailColor = ball.team === 'day' ? this.theme.dayBall : this.theme.nightBall;
+          this.particles.addBallTrail(ball.x, ball.y, trailColor, ball.radius, ball.atMaxSpeed === true);
         }
 
         this.physics.checkSquareCollision(
@@ -846,6 +948,130 @@ class PongWarsGame {
     ctx.closePath();
   }
 
+  // ===== 领地水墨纹理层（纯视觉增量缓存：只改绘制方式，不改 squares 数据结构） =====
+  _terrRand(i, j, k) {
+    let h = ((i * 73856093) ^ (j * 19349663) ^ (k * 83492791)) >>> 0;
+    h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967296;
+  }
+
+  _renderTerrCell(ctx, i, j) {
+    const s = this.squareSize;
+    const x = i * s;
+    const y = j * s;
+    const color = this.squares[i][j];
+
+    ctx.globalAlpha = 1;
+    ctx.clearRect(x, y, s, s);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, s, s);
+
+    if (color === this.theme.nightColor) {
+      // 黑夜领地：大尺度平滑墨色晕染（跨格连续浓淡，非平涂死黑）
+      const nx = x / this.width;
+      const ny = y / this.height;
+      let v = Math.sin(nx * 9.3 + 1.7) * Math.cos(ny * 7.1 + 0.6) * 0.5
+            + Math.sin((nx + ny) * 5.2 + 3.1) * 0.35
+            + Math.cos(nx * 3.7 - ny * 6.4) * 0.15;
+      v *= 0.85 + this._terrRand(i, j, 0) * 0.3; // 轻微逐格抖动防色带
+      if (v > 0) {
+        ctx.fillStyle = `rgba(232, 224, 208, ${(v * 0.1).toFixed(3)})`;
+      } else {
+        ctx.fillStyle = `rgba(0, 0, 0, ${(-v * 0.17).toFixed(3)})`;
+      }
+      ctx.fillRect(x, y, s, s);
+      // 叠加一格内极淡的径向墨团，增加宣纸吸墨的局部质感
+      const rx = x + this._terrRand(i, j, 2) * s;
+      const ry = y + this._terrRand(i, j, 3) * s;
+      const rr = s * (0.5 + this._terrRand(i, j, 4) * 0.5);
+      const g = ctx.createRadialGradient(rx, ry, 0, rx, ry, rr);
+      const lightBlob = this._terrRand(i, j, 5) > 0.5;
+      g.addColorStop(0, lightBlob ? 'rgba(232, 224, 208, 0.05)' : 'rgba(0, 0, 0, 0.08)');
+      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, s, s);
+    } else {
+      // 白昼领地：宣纸纤维细纹
+      ctx.strokeStyle = 'rgba(140, 132, 118, 0.05)';
+      ctx.lineWidth = 1;
+      for (let k = 0; k < 2; k++) {
+        const rx = x + this._terrRand(i, j, k * 2) * s;
+        const ry = y + this._terrRand(i, j, k * 2 + 1) * s;
+        const ang = this._terrRand(i, j, 10 + k) * Math.PI;
+        const len = s * (0.35 + this._terrRand(i, j, 20 + k) * 0.45);
+        ctx.beginPath();
+        ctx.moveTo(rx - Math.cos(ang) * len / 2, ry - Math.sin(ang) * len / 2);
+        ctx.lineTo(rx + Math.cos(ang) * len / 2, ry + Math.sin(ang) * len / 2);
+        ctx.stroke();
+      }
+    }
+
+    // 交界晕染：与异色格相邻的边上叠不规则小墨点，让边界更有机
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (let n = 0; n < 4; n++) {
+      const ni = i + dirs[n][0];
+      const nj = j + dirs[n][1];
+      if (ni < 0 || nj < 0 || ni >= this.gridX || nj >= this.gridY) continue;
+      if (this.squares[ni][nj] === color) continue;
+      for (let k = 0; k < 3; k++) {
+        const t = this._terrRand(i, j, 30 + n * 3 + k);
+        const wob = (this._terrRand(i, j, 60 + n * 3 + k) - 0.5) * 3.5;
+        let ex, ey;
+        if (dirs[n][0] !== 0) {
+          ex = x + (dirs[n][0] > 0 ? s - 1.5 : 1.5) + wob * dirs[n][0];
+          ey = y + t * s;
+        } else {
+          ex = x + t * s;
+          ey = y + (dirs[n][1] > 0 ? s - 1.5 : 1.5) + wob * dirs[n][1];
+        }
+        const rr = 1.8 + this._terrRand(i, j, 50 + n * 3 + k) * 3.2;
+        ctx.globalAlpha = 0.18 + this._terrRand(i, j, 70 + n * 3 + k) * 0.2;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(ex, ey, rr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  _syncTerritoryLayer() {
+    if (!this._terrLayer || this._terrLayer.width !== this.width || this._terrLayer.height !== this.height) {
+      this._terrLayer = document.createElement('canvas');
+      this._terrLayer.width = this.width;
+      this._terrLayer.height = this.height;
+      this._terrColors = null;
+    }
+    const ctx = this._terrLayer.getContext('2d');
+
+    if (!this._terrColors) {
+      this._terrColors = [];
+      for (let i = 0; i < this.gridX; i++) {
+        this._terrColors[i] = new Array(this.gridY);
+        for (let j = 0; j < this.gridY; j++) {
+          this._renderTerrCell(ctx, i, j);
+          this._terrColors[i][j] = this.squares[i][j];
+        }
+      }
+      return;
+    }
+
+    // 增量重绘：仅颜色发生变化的格子（及其邻居的交界晕染）
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] !== this._terrColors[i][j]) {
+          this._terrColors[i][j] = this.squares[i][j];
+          this._renderTerrCell(ctx, i, j);
+          if (i + 1 < this.gridX) this._renderTerrCell(ctx, i + 1, j);
+          if (i - 1 >= 0) this._renderTerrCell(ctx, i - 1, j);
+          if (j + 1 < this.gridY) this._renderTerrCell(ctx, i, j + 1);
+          if (j - 1 >= 0) this._renderTerrCell(ctx, i, j - 1);
+        }
+      }
+    }
+  }
+
   draw() {
     this.ctx.save();
     
@@ -855,12 +1081,13 @@ class PongWarsGame {
 
     this.ctx.clearRect(0, 0, this.width, this.height);
 
-    // 1. Draw Grid Squares
+    // 1. Draw Grid Squares（水墨宣纸/晕染领地：离屏纹理层一次性贴上）
+    this._syncTerritoryLayer();
+    this.ctx.drawImage(this._terrLayer, 0, 0);
+
+    // Stones overlay
     for (let i = 0; i < this.gridX; i++) {
       for (let j = 0; j < this.gridY; j++) {
-        this.ctx.fillStyle = this.squares[i][j];
-        this.ctx.fillRect(i * this.squareSize, j * this.squareSize, this.squareSize, this.squareSize);
-
         const stone = this.stoneGrid[i] ? this.stoneGrid[i][j] : null;
         if (stone) {
           this.ctx.save();
@@ -1021,36 +1248,38 @@ class PongWarsGame {
     // 4. Draw Lasers & Particles
     this.particles.draw(this.ctx, this.width);
 
-    // 5. Draw Distinct Black & White Balls
+    // 5. Draw Distinct Black & White Balls（水墨风：墨珠=不规则晕染墨团，白丸=发光球+柔光晕）
     this.balls.forEach(ball => {
-      this.ctx.save();
-      this.ctx.beginPath();
-      this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-
       const isDayBall = ball.team === 'day';
-      const actualBallColor = isDayBall ? '#141414' : '#FFFFFF';
+      const ballColor = isDayBall ? this.theme.dayBall : this.theme.nightBall;
+      const spr = _gmGetBallSprite(ballColor, isDayBall);
+      const drawSize = ball.radius * 2 * spr.scale;
 
+      this.ctx.save();
       if (ball.atMaxSpeed === true) {
-        this.ctx.shadowColor = isDayBall ? '#000000' : '#FFFFFF';
-        this.ctx.shadowBlur = 16;
-        this.ctx.strokeStyle = isDayBall ? '#55504A' : '#E8E2D4';
-        this.ctx.lineWidth = 2;
-        this.ctx.stroke();
+        this.ctx.shadowColor = isDayBall ? 'rgba(0,0,0,0.85)' : ballColor;
+        this.ctx.shadowBlur = 18;
+      } else if (!isDayBall) {
+        // 白丸常态柔和辉光
+        this.ctx.shadowColor = 'rgba(255,255,255,0.55)';
+        this.ctx.shadowBlur = 14;
       } else {
-        this.ctx.shadowColor = 'rgba(0,0,0,0.4)';
-        this.ctx.shadowBlur = 6;
+        this.ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        this.ctx.shadowBlur = 5;
       }
-
-      this.ctx.fillStyle = actualBallColor;
-      this.ctx.fill();
-      this.ctx.closePath();
-
-      this.ctx.beginPath();
-      this.ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.25, 0, Math.PI * 2);
-      this.ctx.fillStyle = isDayBall ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)';
-      this.ctx.fill();
-
+      this.ctx.drawImage(spr.canvas, ball.x - drawSize / 2, ball.y - drawSize / 2, drawSize, drawSize);
       this.ctx.restore();
+
+      if (isDayBall) {
+        // 墨珠表面的宣纸反光小高光
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.26;
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.beginPath();
+        this.ctx.arc(ball.x - ball.radius * 0.28, ball.y - ball.radius * 0.3, ball.radius * 0.22, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.restore();
+      }
     });
 
     this.ctx.restore();
