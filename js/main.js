@@ -81,13 +81,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function applyMobileLayout() {
     if (!mobileControls) return;
-    if (game.mode === 'sim') {
-      mobileControls.style.display = 'none';
-      mobileControls.dataset.layout = 'sim';
-      return;
-    }
-    mobileControls.style.display = 'grid';
-    if (game.mode === 'pvp') mobileControls.dataset.layout = 'pvp';
+    // 显示/隐藏完全交给 CSS（body.is-mobile + data-layout），这里只设置布局标识
+    if (game.mode === 'sim') mobileControls.dataset.layout = 'sim';
+    else if (game.mode === 'pvp') mobileControls.dataset.layout = 'pvp';
     else if (game.mode === 'lan') {
       mobileControls.dataset.layout = game.playerSide === 'night' ? 'lan-night' : 'lan-day';
     } else {
@@ -631,6 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ?mobiletest=1 可在桌面模拟移动端布局（调试用途）
   const forceMobile = new URLSearchParams(location.search).has('mobiletest');
   const isCoarsePointer = forceMobile || window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  document.body.classList.toggle('is-mobile', isCoarsePointer);
 
   const landscapeMq = window.matchMedia('(orientation: landscape)');
   function syncOrientationClass() {

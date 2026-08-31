@@ -624,11 +624,20 @@ canvas {
 }
 
 /* ====== Mobile Virtual Controls ====== */
+/* 默认隐藏（PC 不显示），仅移动端（body.is-mobile）显示 */
 .mobile-controls {
+  display: none;
   width: 100%;
-  display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+body.is-mobile .mobile-controls {
+  display: grid;
+}
+
+body.is-mobile .mobile-controls[data-layout="sim"] {
+  display: none;
 }
 
 .mobile-controls[data-layout="pve"] #p2SkillBtn,
@@ -1103,23 +1112,24 @@ body.game-active.landscape-mode .touch-zone {
   touch-action: none;
 }
 
-/* 上 / 下 挡板按钮：水墨白底墨框，大号拇指热区 */
+/* 上 / 下 挡板按钮：水墨白底墨框，两个几乎占满左区 */
 .touch-zone .zone-btn {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: min(86%, 170px);
-  min-height: 108px;
-  border-radius: 18px;
+  gap: 10px;
+  width: min(94%, 260px);
+  flex: 1;
+  min-height: 0;
+  border-radius: 20px;
   border: 2.5px solid #1c1812;
   outline: 1px solid rgba(28, 24, 18, 0.4);
   outline-offset: 3px;
   background: rgba(253, 251, 246, 0.95);
   color: #1c1812;
-  font-size: 1.1rem;
-  letter-spacing: 4px;
+  font-size: 1.35rem;
+  letter-spacing: 6px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
@@ -1128,8 +1138,8 @@ body.game-active.landscape-mode .touch-zone {
 }
 
 .touch-zone .zone-btn svg {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
 }
 
 .touch-zone .zone-btn.held,
@@ -1168,7 +1178,7 @@ body.game-active:not(.landscape-mode) .rotate-hint {
   display: flex;
 }
 
-/* 右侧技能区：两个大按钮 */
+/* 右侧技能区：按钮与左侧挡板按钮同尺寸，占满右区 */
 body.game-active.landscape-mode .mobile-controls {
   display: flex !important;
   position: fixed;
@@ -1181,31 +1191,31 @@ body.game-active.landscape-mode .mobile-controls {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22px;
-  padding: 12px;
+  gap: 16px;
+  padding: 14px 10px;
   border-left: 1px dashed rgba(36, 32, 25, 0.35);
   background: rgba(252, 250, 244, 0.4);
 }
 
 body.game-active.landscape-mode .action-btn {
-  width: 100%;
-  max-width: 150px;
-  min-height: 84px;
-  border-radius: 16px;
-  font-size: 1.05rem;
+  width: min(94%, 260px);
+  max-width: 260px;
+  flex: 1;
+  min-height: 0;
+  border-radius: 20px;
+  font-size: 1.15rem;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 body.game-active.landscape-mode .action-btn .svg-icon {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
 }
 
-/* 双人同屏时右侧 4 个按钮，压缩高度避免溢出 */
+/* 双人同屏时右侧 4 个按钮，仍占满右区但字体略小 */
 body.game-active.landscape-mode .mobile-controls[data-layout="pvp"] .action-btn {
-  min-height: 58px;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   gap: 2px;
 }
 
