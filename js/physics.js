@@ -57,8 +57,8 @@ class PhysicsEngine {
 
           // Case A: Enemy has petrified / fortified this block!
           if (stone && stone.owner !== ball.team) {
-            // High speed mode (penetrationCapacity >= 3): 1-hit shatter stone but consume all penetration for this bounce
-            if (ball.penetrationCapacity >= 3) {
+            // High speed mode (极速档 atMaxSpeed): 1-hit shatter stone but consume all penetration for this bounce
+            if (ball.atMaxSpeed === true) {
               stoneGrid[i][j] = null;
               squares[i][j] = ball.reverseColor;
               flippedCount++;
@@ -196,7 +196,7 @@ class PhysicsEngine {
         ball.dy = Math.sin(angle) * newSpeed + (paddle.vy || 0) * 0.2;
 
         const speedRatio = newSpeed / 6.4;
-        ball.penetrationCapacity = speedRatio < 0.85 ? 1 : (speedRatio < 1.25 ? 2 : 3);
+        ball.penetrationCapacity = speedRatio < 0.85 ? 1 : 2;
         ball.remainingPenetration = ball.penetrationCapacity;
       } else {
         // Own ball: Normal deflect at current speed

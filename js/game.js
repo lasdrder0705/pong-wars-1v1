@@ -278,6 +278,7 @@ class PongWarsGame {
 
   // Normal Skill: Solar Flare
   activateSolarFlare(isRemote = false) {
+    if (this.state !== 'running' && !isRemote) return;
     if (this.isOnline && !this.isHost && !isRemote) {
       if (this.p1SkillCD > 0) return;
       this.p1SkillCD = 250;
@@ -327,6 +328,7 @@ class PongWarsGame {
 
   // Normal Skill: Eclipse
   activateEclipse(isRemote = false) {
+    if (this.state !== 'running' && !isRemote) return;
     if (this.isOnline && !this.isHost && !isRemote) {
       if (this.p2SkillCD > 0) return;
       this.p2SkillCD = 250;
@@ -376,6 +378,7 @@ class PongWarsGame {
 
   // Ultimate Skill: 3-Row Laser Beam with Paddle Shielding & Energy Absorption
   activateLaser(isLeft = true, isRemote = false) {
+    if (this.state !== 'running' && !isRemote) return;
     const caster = isLeft ? this.leftPaddle : this.rightPaddle;
     const defender = isLeft ? this.rightPaddle : this.leftPaddle;
     if (caster.energy < 100) return;
@@ -531,7 +534,8 @@ class PongWarsGame {
           penetrationCapacity: ball.penetrationCapacity,
           remainingPenetration: 1,
           isExtra: true,
-          lifetime: 500
+          // 分裂球持续 6 秒：60 步/秒 × 3 子步 × 6 秒 = 1080
+          lifetime: 1080
         });
       }
     } else if (powerup.type === 'freeze') {
@@ -717,7 +721,10 @@ class PongWarsGame {
         }
 
         const ballSpeedRatio = (Math.hypot(ball.dx, ball.dy) / BASE_BALL_SPEED);
-        ball.penetrationCapacity = ballSpeedRatio < 0.85 ? 1 : (ballSpeedRatio < 1.25 ? 2 : 3);
+        // 连破数：低速 1 格，其余 2 格（极速从 3 格下调为 2 格）
+        ball.penetrationCapacity = ballSpeedRatio < 0.85 ? 1 : 2;
+        // 极速档（≥1.25x）标记：用于高速特效与石化一击碎
+        ball.atMaxSpeed = ballSpeedRatio >= 1.25;
 
         const stepDx = (ball.dx / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
         const stepDy = (ball.dy / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
@@ -726,7 +733,7 @@ class PongWarsGame {
         ball.y += stepDy;
 
         if (s === 0) {
-          this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.penetrationCapacity >= 3);
+          this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.atMaxSpeed === true);
         }
 
         this.physics.checkSquareCollision(
@@ -1023,7 +1030,7 @@ class PongWarsGame {
       const isDayBall = ball.team === 'day';
       const actualBallColor = isDayBall ? '#141414' : '#FFFFFF';
 
-      if (ball.penetrationCapacity >= 3) {
+      if (ball.atMaxSpeed === true) {
         this.ctx.shadowColor = isDayBall ? '#000000' : '#FFFFFF';
         this.ctx.shadowBlur = 16;
         this.ctx.strokeStyle = isDayBall ? '#4A5568' : '#00F0FF';

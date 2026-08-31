@@ -363,8 +363,10 @@ document.addEventListener('DOMContentLoaded', () => {
       modeButtons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const mode = btn.dataset.mode;
+      cancelCountdown();
       game.setMode(mode);
-      
+      syncGameActive();
+
       if (mode === 'lan') {
         lanModal.classList.add('show');
         simSpeedGroup.style.display = 'none';
@@ -382,6 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dayYouTag) dayYouTag.classList.add('active');
         if (nightYouTag) nightYouTag.classList.remove('active');
         applyMobileLayout();
+        tryEnterGameFullscreen();
         startNewGame();
       } else {
         simSpeedGroup.style.display = 'none';
@@ -389,6 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dayYouTag) dayYouTag.classList.remove('active');
         if (nightYouTag) nightYouTag.classList.remove('active');
         applyMobileLayout();
+        tryEnterGameFullscreen();
         startNewGame();
       }
     });
@@ -404,6 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (createRoomBtn) {
     createRoomBtn.addEventListener('click', () => {
       unlockAudio();
+      tryEnterGameFullscreen();
       createRoomBtn.disabled = true;
       lanStatus.textContent = '正在初始化房间...';
       game.network.createRoom(null, (err, code) => {
@@ -419,6 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (joinRoomBtn) {
     joinRoomBtn.addEventListener('click', () => {
       unlockAudio();
+      tryEnterGameFullscreen();
       const code = joinCodeInput.value.trim();
       if (!/^\d{4}$/.test(code)) {
         lanStatus.textContent = '请输入正确的4位数字房间码！';
@@ -572,6 +578,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Pause UI
   function updatePauseUI() {
     pauseBtnText.textContent = game.state === 'paused' ? '继续 (P)' : '暂停 (P)';
+    syncGameActive();
   }
   pauseBtn.addEventListener('click', () => {
     unlockAudio();
@@ -580,6 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function startNewGame() {
     gameOverModal.classList.remove('show');
+    if (startOverlay) startOverlay.classList.remove('show');
     game.start();
     updatePauseUI();
     if (game.mode === 'pve') {
@@ -591,12 +599,167 @@ document.addEventListener('DOMContentLoaded', () => {
 
   restartBtn.addEventListener('click', () => {
     unlockAudio();
-    if (game.mode !== 'lan') startNewGame();
+    if (game.mode !== 'lan') { tryEnterGameFullscreen(); startNewGame(); }
   });
   modalRestartBtn.addEventListener('click', () => {
     unlockAudio();
-    if (game.mode !== 'lan') startNewGame();
+    if (game.mode !== 'lan') { tryEnterGameFullscreen(); startNewGame(); }
   });
+
+  // ====== 开局倒计时 / 移动端全屏横屏 / 挡板控制区 ======
+  const startOverlay = document.getElementById('startOverlay');
+  const startGameBtn = document.getElementById('startGameBtn');
+  const countdownOverlay = document.getElementById('countdownOverlay');
+  const countdownText = document.getElementById('countdownText');
+  const paddleZone = document.getElementById('paddleZone');
+  const exitFsBtn = document.getElementById('exitFsBtn');
+
+  // ?mobiletest=1 可在桌面模拟移动端布局（调试用途）
+  const forceMobile = new URLSearchParams(location.search).has('mobiletest');
+  const isCoarsePointer = forceMobile || window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+
+  const landscapeMq = window.matchMedia('(orientation: landscape)');
+  function syncOrientationClass() {
+    document.body.classList.toggle('landscape-mode', landscapeMq.matches || forceMobile);
+  }
+  if (landscapeMq.addEventListener) landscapeMq.addEventListener('change', syncOrientationClass);
+  else if (landscapeMq.addListener) landscapeMq.addListener(syncOrientationClass);
+  window.addEventListener('resize', syncOrientationClass);
+  syncOrientationClass();
+
+  let countdownRunning = false;
+  let countdownToken = 0;
+
+  function syncGameActive() {
+    const active = isCoarsePointer && game.mode !== 'sim' &&
+      (game.state === 'running' || countdownRunning);
+    document.body.classList.toggle('game-active', active);
+  }
+
+  function runCountdown(done) {
+    const stepsText = ['3', '2', '1', '战'];
+    let idx = 0;
+    const myToken = ++countdownToken;
+    countdownOverlay.classList.add('show');
+    const tick = () => {
+      if (myToken !== countdownToken) return;
+      if (idx >= stepsText.length) {
+        countdownOverlay.classList.remove('show');
+        done();
+        return;
+      }
+      countdownText.textContent = stepsText[idx];
+      countdownText.classList.remove('pop');
+      void countdownText.offsetWidth; // 重启动画
+      countdownText.classList.add('pop');
+      idx++;
+      setTimeout(tick, idx >= stepsText.length ? 450 : 700);
+    };
+    tick();
+  }
+
+  function cancelCountdown() {
+    countdownToken++;
+    countdownRunning = false;
+    if (countdownOverlay) countdownOverlay.classList.remove('show');
+  }
+
+  // 包装 game.start：先重置棋盘，再 3-2-1 倒计时，最后进入 running
+  game.start = function () {
+    game.sound.init();
+    if (countdownRunning) return;
+    if (startOverlay) startOverlay.classList.remove('show');
+    countdownRunning = true;
+    game.reset();
+    syncGameActive();
+    updatePauseUI();
+    runCountdown(() => {
+      game.state = 'running';
+      countdownRunning = false;
+      syncGameActive();
+      updatePauseUI();
+    });
+  };
+
+  async function tryEnterGameFullscreen() {
+    if (!isCoarsePointer) return;
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (_) {}
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock('landscape');
+      }
+    } catch (_) {}
+    syncFsClass();
+  }
+
+  function exitGameFullscreen() {
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch (_) {}
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+  }
+
+  function syncFsClass() {
+    document.body.classList.toggle('real-fs', !!document.fullscreenElement);
+  }
+  document.addEventListener('fullscreenchange', syncFsClass);
+
+  if (exitFsBtn) {
+    exitFsBtn.addEventListener('click', () => {
+      unlockAudio();
+      exitGameFullscreen();
+      if (game.state === 'running') requestPauseToggle();
+    });
+  }
+
+  if (startGameBtn) {
+    startGameBtn.addEventListener('click', () => {
+      unlockAudio();
+      tryEnterGameFullscreen();
+      if (game.mode !== 'lan') startNewGame();
+    });
+  }
+
+  // 挡板控制区：点按 / 滑动瞬移挡板（映射到棋盘的垂直坐标）
+  function moveMyPaddleTo(clientY) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const ty = (clientY - rect.top) * (canvas.height / rect.height);
+    const clampY = (p, y) => Math.max(p.height / 2, Math.min(canvas.height - p.height / 2, y));
+    if (game.mode === 'lan') {
+      if (game.playerSide === 'day') {
+        game.leftPaddle.y = clampY(game.leftPaddle, ty);
+        game.network.sendPaddleInput(game.leftPaddle.y, 0);
+      } else {
+        game.rightPaddle.y = clampY(game.rightPaddle, ty);
+        game.network.sendPaddleInput(game.rightPaddle.y, 0);
+      }
+    } else if (game.mode === 'pve') {
+      game.leftPaddle.y = clampY(game.leftPaddle, ty);
+    } else if (game.mode === 'pvp') {
+      game.leftPaddle.y = clampY(game.leftPaddle, ty);
+    }
+  }
+
+  if (paddleZone) {
+    paddleZone.addEventListener('touchstart', (e) => {
+      unlockAudio();
+      e.preventDefault();
+      for (let i = 0; i < e.touches.length; i++) moveMyPaddleTo(e.touches[i].clientY);
+    }, { passive: false });
+    paddleZone.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      for (let i = 0; i < e.touches.length; i++) moveMyPaddleTo(e.touches[i].clientY);
+    }, { passive: false });
+
+    // 鼠标同样可用（便于桌面测试）
+    let zoneMouseDown = false;
+    paddleZone.addEventListener('mousedown', (e) => { zoneMouseDown = true; moveMyPaddleTo(e.clientY); });
+    window.addEventListener('mousemove', (e) => { if (zoneMouseDown) moveMyPaddleTo(e.clientY); });
+    window.addEventListener('mouseup', () => { zoneMouseDown = false; });
+  }
 
   // Main UI update loop
   let lastFrameTime = performance.now();
@@ -622,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Speed Ratio & Penetration HUD
     const speedRatio = (0.5 + Math.min(1.0, game.elapsedSeconds / 75.0) * 1.0).toFixed(1);
-    const penetration = speedRatio < 0.85 ? 1 : (speedRatio < 1.25 ? 2 : 3);
+    const penetration = speedRatio < 0.85 ? 1 : 2;
     speedTierBadge.textContent = `速度 ${speedRatio}x · 连破 ${penetration}格`;
 
     // Timer
@@ -675,6 +838,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Game Over Trigger
     if (game.state === 'gameover' && !gameOverModal.classList.contains('show')) {
       gameOverModal.classList.add('show');
+      document.body.classList.remove('game-active');
+      exitGameFullscreen();
       const dayWon = game.dayScore >= game.nightScore;
       winnerTitle.textContent = dayWon ? '昼方胜利 (Day Wins)' : '夜方胜利 (Night Wins)';
       winnerTitle.style.color = dayWon ? game.theme.dayAccent : game.theme.nightAccent;
@@ -684,10 +849,10 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(loop);
   }
 
-  // Initial Boot
+  // Initial Boot：只渲染静态棋盘背景，不自动开局（点击“开战”或切换模式后倒计时开始）
   applyThemeCSS('classic');
   applyMobileLayout();
-  startNewGame();
+  game.reset();
   window.game = game;
   requestAnimationFrame(loop);
 });

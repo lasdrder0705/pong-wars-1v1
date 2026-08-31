@@ -8,11 +8,31 @@
     name="description"
     content="基于网格碰撞与领地争夺的双人实时对战游戏软件 V1.0，支持局域网联机、双人同屏、智能 AI 挑战与自动演化观战。"
   />
-  <link rel="stylesheet" href="style.css?v=20260831b" />
+  <link rel="stylesheet" href="style.css?v=20260831c" />
   <!-- WebRTC P2P Signaling Broker -->
-  <script src="vendor/peerjs.min.js?v=20260831b"></script>
+  <script src="vendor/peerjs.min.js?v=20260831c"></script>
 </head>
 <body>
+
+  <!-- 八卦背景装饰 -->
+  <div class="bg-bagua" aria-hidden="true">
+    <div class="bg-bagua-inner">
+      <span class="bg-trigram" style="--a:0deg">☰</span>
+      <span class="bg-trigram" style="--a:45deg">☱</span>
+      <span class="bg-trigram" style="--a:90deg">☲</span>
+      <span class="bg-trigram" style="--a:135deg">☳</span>
+      <span class="bg-trigram" style="--a:180deg">☴</span>
+      <span class="bg-trigram" style="--a:225deg">☵</span>
+      <span class="bg-trigram" style="--a:270deg">☶</span>
+      <span class="bg-trigram" style="--a:315deg">☷</span>
+      <svg class="bg-taiji" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="47" fill="#F0E7D3"/>
+        <path d="M50 3 A47 47 0 0 1 50 97 A23.5 23.5 0 0 1 50 50 A23.5 23.5 0 0 0 50 3" fill="#141210"/>
+        <circle cx="50" cy="26.5" r="6" fill="#141210"/>
+        <circle cx="50" cy="73.5" r="6" fill="#F0E7D3"/>
+      </svg>
+    </div>
+  </div>
 
   <!-- App Header -->
   <header>
@@ -183,6 +203,47 @@
     <!-- Canvas Area -->
     <div class="canvas-wrapper">
       <canvas id="pongCanvas" width="600" height="600"></canvas>
+
+      <!-- Start Overlay（进入网站时不自动开局） -->
+      <div class="start-overlay show" id="startOverlay">
+        <div class="bagua-mark">
+          <span class="trigram" style="--a:0deg">☰</span>
+          <span class="trigram" style="--a:45deg">☱</span>
+          <span class="trigram" style="--a:90deg">☲</span>
+          <span class="trigram" style="--a:135deg">☳</span>
+          <span class="trigram" style="--a:180deg">☴</span>
+          <span class="trigram" style="--a:225deg">☵</span>
+          <span class="trigram" style="--a:270deg">☶</span>
+          <span class="trigram" style="--a:315deg">☷</span>
+          <svg class="taiji-core" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="47" fill="#F0E7D3"/>
+            <path d="M50 3 A47 47 0 0 1 50 97 A23.5 23.5 0 0 1 50 50 A23.5 23.5 0 0 0 50 3" fill="#141210"/>
+            <circle cx="50" cy="26.5" r="6" fill="#141210"/>
+            <circle cx="50" cy="73.5" r="6" fill="#F0E7D3"/>
+          </svg>
+        </div>
+        <h2 class="start-title">昼夜领地对战</h2>
+        <p class="start-sub">太极分两仪 · 昼夜夺乾坤</p>
+        <button class="start-btn" id="startGameBtn">开 战</button>
+        <p class="start-hint">可在上方切换模式，默认人机对战</p>
+      </div>
+
+      <!-- Countdown Overlay -->
+      <div class="countdown-overlay" id="countdownOverlay">
+        <span class="countdown-num" id="countdownText">3</span>
+      </div>
+    </div>
+
+    <!-- 移动端横屏：左侧挡板控制区 -->
+    <div class="touch-zone" id="paddleZone" aria-hidden="true">
+      <div class="zone-hint">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="3" x2="12" y2="21"></line>
+          <polyline points="7 8 12 3 17 8"></polyline>
+          <polyline points="7 16 12 21 17 16"></polyline>
+        </svg>
+        <span>挡板控制区<br />点按 · 滑动瞬移</span>
+      </div>
     </div>
 
     <!-- Mobile Virtual Action Buttons -->
@@ -340,13 +401,13 @@
         <h2 class="modal-title">玩法与机制说明</h2>
         <button class="close-modal-btn" id="closeHelpModalIconBtn">&times;</button>
       </div>
-      <p class="modal-sub">手机可单指拖拽挡板；联机开局随机分配阵营，并用横幅、YOU 标记告诉你自己在哪一侧。</p>
+      <p class="modal-sub">手机点按或滑动屏幕，挡板会瞬移到指尖高度；联机开局随机分配阵营，并用横幅、YOU 标记告诉你自己在哪一侧。</p>
 
       <div class="guide-section">
         <h4 class="guide-title">控制与操作方式</h4>
         <div class="guide-row">
           <span>手机 / 平板</span>
-          <span>在棋盘上<strong>单指上下拖动</strong>控制己方挡板</span>
+          <span>在棋盘或左侧控制区<strong>点按 / 上下滑动</strong>，挡板瞬移到指尖高度</span>
         </div>
         <div class="guide-row">
           <span>键盘 · 昼方（左）</span>
@@ -394,6 +455,9 @@
     </div>
   </div>
 
+  <!-- 移动端全屏退出按钮 -->
+  <button class="exit-fs-btn" id="exitFsBtn" title="退出全屏" aria-label="退出全屏">✕</button>
+
   <!-- Footer -->
   <footer>
     <p>
@@ -404,12 +468,12 @@
   </footer>
 
   <!-- Scripts -->
-  <script src="js/audio.js?v=20260831b"></script>
-  <script src="js/particles.js?v=20260831b"></script>
-  <script src="js/physics.js?v=20260831b"></script>
-  <script src="js/ai.js?v=20260831b"></script>
-  <script src="js/network.js?v=20260831b"></script>
-  <script src="js/game.js?v=20260831b"></script>
-  <script src="js/main.js?v=20260831b"></script>
+  <script src="js/audio.js?v=20260831c"></script>
+  <script src="js/particles.js?v=20260831c"></script>
+  <script src="js/physics.js?v=20260831c"></script>
+  <script src="js/ai.js?v=20260831c"></script>
+  <script src="js/network.js?v=20260831c"></script>
+  <script src="js/game.js?v=20260831c"></script>
+  <script src="js/main.js?v=20260831c"></script>
 </body>
 </html>
