@@ -4,54 +4,54 @@
 
 const THEMES = {
   classic: {
-    name: '经典昼夜 (Day & Night)',
-    dayColor: '#D9E8E3',
-    dayBall: '#141414', // Obsidian Black
-    dayAccent: '#2A9D8F',
-    nightColor: '#114C5A',
-    nightBall: '#FFFFFF', // Pure Crystal White
-    nightAccent: '#E76F51',
-    bg: 'linear-gradient(135deg, #172B36 0%, #0F1D24 100%)'
+    name: '宣纸水墨 (Rice Paper)',
+    dayColor: '#F2EDE2',
+    dayBall: '#141414', // 墨珠
+    dayAccent: '#2B2620',
+    nightColor: '#26221B',
+    nightBall: '#FFFFFF', // 白丸
+    nightAccent: '#8A8175',
+    bg: 'linear-gradient(160deg, #F7F3E9 0%, #ECE5D3 100%)'
   },
   cyberpunk: {
-    name: '赛博霓虹 (Cyberpunk)',
-    dayColor: '#00F0FF',
+    name: '浓墨重峦 (Heavy Ink)',
+    dayColor: '#E7E0CF',
     dayBall: '#141414',
-    dayAccent: '#00F0FF',
-    nightColor: '#1A0B2E',
+    dayAccent: '#17140F',
+    nightColor: '#12100C',
     nightBall: '#FFFFFF',
-    nightAccent: '#FF007F',
-    bg: 'linear-gradient(135deg, #090214 0%, #1a0826 100%)'
+    nightAccent: '#6E675C',
+    bg: 'linear-gradient(160deg, #F2EDE0 0%, #E2D9C2 100%)'
   },
   elemental: {
-    name: '冰火交锋 (Fire & Ice)',
-    dayColor: '#FFE5B4',
+    name: '淡墨远山 (Light Ink)',
+    dayColor: '#EFEDE7',
     dayBall: '#141414',
-    dayAccent: '#F77F00',
-    nightColor: '#1D3557',
+    dayAccent: '#4A463E',
+    nightColor: '#4A463E',
     nightBall: '#FFFFFF',
-    nightAccent: '#A8DADC',
-    bg: 'linear-gradient(135deg, #0b1726 0%, #201115 100%)'
+    nightAccent: '#A39C8D',
+    bg: 'linear-gradient(160deg, #F8F6F0 0%, #EAE8E0 100%)'
   },
   void: {
-    name: '曜金虚空 (Solar & Void)',
-    dayColor: '#FFF3B0',
+    name: '夜池墨影 (Night Pond)',
+    dayColor: '#DCD7C9',
     dayBall: '#141414',
-    dayAccent: '#FFD700',
-    nightColor: '#331832',
+    dayAccent: '#242019',
+    nightColor: '#1A1712',
     nightBall: '#FFFFFF',
-    nightAccent: '#9E2A2B',
-    bg: 'linear-gradient(135deg, #180c18 0%, #29121a 100%)'
+    nightAccent: '#5C564C',
+    bg: 'linear-gradient(160deg, #2A251D 0%, #17140F 100%)'
   },
   monochrome: {
     name: '极简黑白 (Monochrome)',
     dayColor: '#F5F5F7',
     dayBall: '#141414',
-    dayAccent: '#86868B',
+    dayAccent: '#3A3A3C',
     nightColor: '#1D1D1F',
     nightBall: '#FFFFFF',
-    nightAccent: '#E5E5EA',
-    bg: 'linear-gradient(135deg, #111112 0%, #222225 100%)'
+    nightAccent: '#86868B',
+    bg: 'linear-gradient(160deg, #FAFAFA 0%, #E8E8EA 100%)'
   }
 };
 
@@ -322,7 +322,7 @@ class PongWarsGame {
       }
     }
 
-    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#FFD700', 65);
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, this.theme.dayAccent, 65);
     this.calculateTerritory();
   }
 
@@ -372,7 +372,7 @@ class PongWarsGame {
       }
     }
 
-    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#7000FF', 65);
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, this.theme.nightAccent, 65);
     this.calculateTerritory();
   }
 
@@ -391,7 +391,7 @@ class PongWarsGame {
 
     caster.energy = 0;
     const targetColor = isLeft ? this.theme.dayColor : this.theme.nightColor;
-    const beamColor = isLeft ? (this.theme.dayAccent || '#FFD700') : (this.theme.nightAccent || '#7000FF');
+    const beamColor = isLeft ? (this.theme.dayAccent || '#2B2620') : (this.theme.nightAccent || '#8A8175');
 
     let centerRow = Math.floor(caster.y / this.squareSize);
     centerRow = Math.max(1, Math.min(this.gridY - 2, centerRow));
@@ -417,7 +417,7 @@ class PongWarsGame {
 
       this.sound.playShieldAbsorb();
       this.particles.shake(5, 2);
-      this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#7000FF') : (this.theme.dayAccent || '#FFD700'), 25);
+      this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#8A8175') : (this.theme.dayAccent || '#2B2620'), 25);
     } else {
       this.sound.playLaser(isLeft);
       this.particles.shake(6, 2.5);
@@ -774,16 +774,16 @@ class PongWarsGame {
             this.dayCombo = 0;
             this.sound.playPaddleHit(false);
             this.particles.addShockwave(paddle.x, paddle.y, this.theme.dayColor, 35);
-            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#FFD700', 8);
-            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, this.theme.dayAccent, 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#8A8175');
           });
 
           this.physics.checkPaddleCollision(ball, this.rightPaddle, this.leftPaddle, false, (paddle, enemyPaddle, b) => {
             this.nightCombo = 0;
             this.sound.playPaddleHit(false);
             this.particles.addShockwave(paddle.x, paddle.y, this.theme.nightColor, 35);
-            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#7000FF', 8);
-            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, this.theme.nightAccent, 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#8A8175');
           });
         }
 
@@ -864,17 +864,17 @@ class PongWarsGame {
         const stone = this.stoneGrid[i] ? this.stoneGrid[i][j] : null;
         if (stone) {
           this.ctx.save();
-          this.ctx.strokeStyle = '#4A5568';
+          this.ctx.strokeStyle = '#55504A';
           this.ctx.lineWidth = 2.5;
           this.ctx.strokeRect(i * this.squareSize + 1.5, j * this.squareSize + 1.5, this.squareSize - 3, this.squareSize - 3);
 
-          this.ctx.fillStyle = '#4A5568';
+          this.ctx.fillStyle = '#55504A';
           this.ctx.beginPath();
           this.ctx.arc(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2, 2.5, 0, Math.PI * 2);
           this.ctx.fill();
 
           if (stone.hp === 1) {
-            this.ctx.strokeStyle = '#E2E8F0';
+            this.ctx.strokeStyle = '#CFC8BA';
             this.ctx.lineWidth = 1.5;
             this.ctx.beginPath();
             this.ctx.moveTo(i * this.squareSize + 4, j * this.squareSize + 4);
@@ -914,10 +914,10 @@ class PongWarsGame {
 
       this.ctx.beginPath();
       this.ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = 'rgba(15, 25, 35, 0.9)';
+      this.ctx.fillStyle = 'rgba(26, 23, 18, 0.92)';
       this.ctx.fill();
       this.ctx.lineWidth = 2;
-      this.ctx.strokeStyle = p.type === 'petrify' ? '#A0AEC0' : '#FFD700';
+      this.ctx.strokeStyle = p.type === 'petrify' ? '#8C857A' : '#F0E7D3';
       this.ctx.stroke();
 
       this.ctx.strokeStyle = '#FFFFFF';
@@ -934,7 +934,7 @@ class PongWarsGame {
         this.ctx.lineTo(-5, -3);
         this.ctx.closePath();
         this.ctx.stroke();
-        this.ctx.fillStyle = '#A0AEC0';
+        this.ctx.fillStyle = '#8C857A';
         this.ctx.fill();
       } else if (p.type === 'bomb') {
         this.ctx.beginPath();
@@ -980,14 +980,14 @@ class PongWarsGame {
         this.ctx.save();
         
         if (p.frozenTimer > 0) {
-          this.ctx.shadowColor = '#00E5FF';
+          this.ctx.shadowColor = '#FFFFFF';
           this.ctx.shadowBlur = 12;
         } else if (p.energy >= 100) {
-          this.ctx.shadowColor = '#FFC801';
+          this.ctx.shadowColor = '#2B2620';
           this.ctx.shadowBlur = 18;
         }
 
-        this.ctx.fillStyle = p.frozenTimer > 0 ? '#00E5FF' : (p.isLeft ? this.theme.dayBall : this.theme.nightBall);
+        this.ctx.fillStyle = p.frozenTimer > 0 ? '#B8B2A4' : (p.isLeft ? this.theme.dayBall : this.theme.nightBall);
         
         const rx = p.x - p.width / 2;
         const ry = p.y - p.height / 2;
@@ -1004,7 +1004,7 @@ class PongWarsGame {
           this.ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
           this.ctx.fill();
 
-          this.ctx.strokeStyle = 'rgba(255, 200, 1, 0.25)';
+          this.ctx.strokeStyle = 'rgba(138, 129, 117, 0.35)';
           this.ctx.setLineDash([4, 4]);
           this.ctx.lineWidth = 1;
           this.ctx.beginPath();
@@ -1033,7 +1033,7 @@ class PongWarsGame {
       if (ball.atMaxSpeed === true) {
         this.ctx.shadowColor = isDayBall ? '#000000' : '#FFFFFF';
         this.ctx.shadowBlur = 16;
-        this.ctx.strokeStyle = isDayBall ? '#4A5568' : '#00F0FF';
+        this.ctx.strokeStyle = isDayBall ? '#55504A' : '#E8E2D4';
         this.ctx.lineWidth = 2;
         this.ctx.stroke();
       } else {
