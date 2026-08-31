@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (game.network.shouldUseSecureSameOriginRelay()) {
       game.network.useSameOriginRelay();
       if (lanHostRow) lanHostRow.hidden = true;
-      hint.textContent = `当前通过安全域名 ${location.host} 联机，将自动使用加密 WSS。`;
+      hint.textContent = `互联网联机已就绪：创建 4 位房间码发给朋友即可对战（优先加密中继，不可用时自动切换加密 P2P）。`;
       return;
     }
     if (lanHostRow) lanHostRow.hidden = false;

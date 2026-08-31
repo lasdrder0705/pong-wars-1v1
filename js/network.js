@@ -219,12 +219,7 @@ class NetworkManager {
       this.ws.send(JSON.stringify({ type: 'create' }));
       return;
     }
-    if (this.shouldUseSecureSameOriginRelay()) {
-      const error = new Error('secure-relay-unavailable');
-      this._status('error', '安全联机服务暂不可用，请稍后重试或联系网站管理员。');
-      if (callback) callback(error);
-      return;
-    }
+    // WS 中继不可用（如纯静态托管）时，回退到互联网 P2P（PeerJS 公共代理，WebRTC 加密）。
     this._createPeerRoom(callback);
   }
 
@@ -236,12 +231,7 @@ class NetworkManager {
       this.ws.send(JSON.stringify({ type: 'join', code: trimmed }));
       return;
     }
-    if (this.shouldUseSecureSameOriginRelay()) {
-      const error = new Error('secure-relay-unavailable');
-      this._status('error', '安全联机服务暂不可用，请稍后重试或联系网站管理员。');
-      if (callback) callback(error);
-      return;
-    }
+    // WS 中继不可用（如纯静态托管）时，回退到互联网 P2P。
     this._joinPeerRoom(trimmed, callback);
   }
 
