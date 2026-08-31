@@ -1,5 +1,5 @@
 /**
- * Main Game State and Controller for Pong Wars 1v1
+ * 昼夜领地对战 V1.0 Main Game State and Controller
  */
 
 const THEMES = {
@@ -55,7 +55,12 @@ const THEMES = {
   }
 };
 
-const BASE_BALL_SPEED = 8.0;
+const BASE_BALL_SPEED = 6.4;
+const DEATHMATCH_WIN_RATIO = 0.9;
+const ALLOWED_GRID_SIZES = new Set([20, 25, 30]);
+const ALLOWED_TIME_LIMITS = new Set([0, 60, 90, 120]);
+const FIXED_STEP_MS = 1000 / 60;
+const MAX_FRAME_DELTA_MS = 250;
 
 class PongWarsGame {
   constructor(canvas, options = {}) {
@@ -65,7 +70,9 @@ class PongWarsGame {
     this.width = canvas.width;
     this.height = canvas.height;
 
-    this.squareSize = options.squareSize || 25;
+    this.squareSize = ALLOWED_GRID_SIZES.has(options.squareSize)
+      ? options.squareSize
+      : 25;
     this.gridX = Math.floor(this.width / this.squareSize);
     this.gridY = Math.floor(this.height / this.squareSize);
 
@@ -85,7 +92,9 @@ class PongWarsGame {
     this.isHost = false;
     this.playerSide = 'day'; // 'day' (left) or 'night' (right)
     
-    this.timeLimit = options.timeLimit || 90;
+    this.timeLimit = ALLOWED_TIME_LIMITS.has(options.timeLimit)
+      ? options.timeLimit
+      : 90;
     this.timeLeft = this.timeLimit;
     this.elapsedSeconds = 0;
     this.timerAcc = 0;
@@ -110,6 +119,7 @@ class PongWarsGame {
     this.powerupSpawnTimer = 0;
     this.keys = {};
     this.simSpeed = 1.0;
+    this.simulationAccumulator = 0;
   }
 
   createPaddle(x, isLeft) {
@@ -124,6 +134,24 @@ class PongWarsGame {
       frozenTimer: 0,
       isLeft: isLeft
     };
+  }
+
+  setGridSize(size) {
+    if (typeof size !== 'number' || !ALLOWED_GRID_SIZES.has(size)) return false;
+    this.squareSize = size;
+    this.gridX = Math.floor(this.width / size);
+    this.gridY = Math.floor(this.height / size);
+    this.physics = new PhysicsEngine(this.gridX, this.gridY, size);
+    this.totalSquares = this.gridX * this.gridY;
+    return true;
+  }
+
+  setTimeLimit(seconds) {
+    if (typeof seconds !== 'number' || !ALLOWED_TIME_LIMITS.has(seconds)) return false;
+    this.timeLimit = seconds;
+    this.timeLeft = seconds;
+    this.timerAcc = 0;
+    return true;
   }
 
   setTheme(themeKey) {
@@ -176,6 +204,7 @@ class PongWarsGame {
     this.timeLeft = this.timeLimit;
     this.elapsedSeconds = 0;
     this.timerAcc = 0;
+    this.simulationAccumulator = 0;
     this.p1SkillCD = 0;
     this.p2SkillCD = 0;
     this.dayCombo = 0;
@@ -184,7 +213,7 @@ class PongWarsGame {
     this.leftPaddle = this.createPaddle(30, true);
     this.rightPaddle = this.createPaddle(this.width - 30, false);
 
-    const initialSpeed = BASE_BALL_SPEED * 0.5;
+    const initialSpeed = (BASE_BALL_SPEED * 0.5) / Math.sqrt(2);
 
     this.balls = [
       {
@@ -224,8 +253,14 @@ class PongWarsGame {
   }
 
   pause() {
-    if (this.state === 'running') this.state = 'paused';
-    else if (this.state === 'paused') this.state = 'running';
+    this.setPaused(this.state !== 'paused');
+  }
+
+  setPaused(paused) {
+    if (typeof paused !== 'boolean') return false;
+    if (paused && this.state === 'running') this.state = 'paused';
+    else if (!paused && this.state === 'paused') this.state = 'running';
+    return true;
   }
 
   calculateTerritory() {
@@ -243,12 +278,14 @@ class PongWarsGame {
 
   // Normal Skill: Solar Flare
   activateSolarFlare(isRemote = false) {
+    if (this.isOnline && !this.isHost && !isRemote) {
+      if (this.p1SkillCD > 0) return;
+      this.p1SkillCD = 250;
+      this.network.sendSkillAction('day');
+      return;
+    }
     if (this.p1SkillCD > 0) return;
     this.p1SkillCD = 5000;
-
-    if (this.isOnline && !isRemote) {
-      this.network.sendSkillAction('day');
-    }
 
     const enemyTiles = [];
     for (let i = 0; i < this.gridX; i++) {
@@ -290,12 +327,14 @@ class PongWarsGame {
 
   // Normal Skill: Eclipse
   activateEclipse(isRemote = false) {
+    if (this.isOnline && !this.isHost && !isRemote) {
+      if (this.p2SkillCD > 0) return;
+      this.p2SkillCD = 250;
+      this.network.sendSkillAction('night');
+      return;
+    }
     if (this.p2SkillCD > 0) return;
     this.p2SkillCD = 5000;
-
-    if (this.isOnline && !isRemote) {
-      this.network.sendSkillAction('night');
-    }
 
     const enemyTiles = [];
     for (let i = 0; i < this.gridX; i++) {
@@ -341,8 +380,10 @@ class PongWarsGame {
     const defender = isLeft ? this.rightPaddle : this.leftPaddle;
     if (caster.energy < 100) return;
 
-    if (this.isOnline && !isRemote) {
+    if (this.isOnline && !this.isHost && !isRemote) {
+      caster.energy = 0;
       this.network.sendLaserAction(isLeft ? 'day' : 'night');
+      return;
     }
 
     caster.energy = 0;
@@ -581,28 +622,54 @@ class PongWarsGame {
   update(delta) {
     if (this.state !== 'running') return;
 
-    this.elapsedSeconds += delta / 1000;
+    const frameDelta = Number.isFinite(delta)
+      ? Math.max(0, Math.min(MAX_FRAME_DELTA_MS, delta))
+      : 0;
+
+    if (this.isOnline && !this.isHost) {
+      this.handleInput();
+      this.particles.update();
+      return;
+    }
+
+    this.simulationAccumulator += frameDelta;
+    let simulationSteps = 0;
+    while (this.simulationAccumulator + 0.000001 >= FIXED_STEP_MS &&
+           simulationSteps < 15 && this.state === 'running') {
+      this.simulateFixedStep();
+      this.simulationAccumulator = Math.max(
+        0,
+        this.simulationAccumulator - FIXED_STEP_MS
+      );
+      simulationSteps++;
+    }
+  }
+
+  simulateFixedStep() {
+    this.elapsedSeconds += FIXED_STEP_MS / 1000;
     if (this.timeLimit > 0) {
-      this.timerAcc += delta;
-      if (this.timerAcc >= 1000) {
+      this.timerAcc += FIXED_STEP_MS;
+      while (this.timerAcc + 0.000001 >= 1000) {
         this.timeLeft--;
-        this.timerAcc -= 1000;
+        this.timerAcc = Math.max(0, this.timerAcc - 1000);
         if (this.timeLeft <= 0) {
           this.endGame();
           return;
         }
       }
     }
-
-    if (this.p1SkillCD > 0) this.p1SkillCD = Math.max(0, this.p1SkillCD - delta);
-    if (this.p2SkillCD > 0) this.p2SkillCD = Math.max(0, this.p2SkillCD - delta);
-
-    if (this.dayScore === this.totalSquares || this.nightScore === this.totalSquares) {
+    if (this.p1SkillCD > 0) {
+      this.p1SkillCD = Math.max(0, this.p1SkillCD - FIXED_STEP_MS);
+    }
+    if (this.p2SkillCD > 0) {
+      this.p2SkillCD = Math.max(0, this.p2SkillCD - FIXED_STEP_MS);
+    }
+    if (this.hasReachedWinTerritory()) {
       this.endGame();
       return;
     }
 
-    const globalSpeedRatio = 0.5 + Math.min(1.0, this.elapsedSeconds / 75.0) * 1.0;
+    const globalSpeedRatio = 0.5 + Math.min(1.0, this.elapsedSeconds / 75.0);
     const globalTargetSpeed = BASE_BALL_SPEED * globalSpeedRatio;
 
     this.handleInput();
@@ -675,7 +742,6 @@ class PongWarsGame {
           },
           (i, j, isDestroyed) => {
             this.sound.playStoneHit(isDestroyed);
-            this.particles.shake(isDestroyed ? 8 : 4, isDestroyed ? 5 : 2.5);
             this.particles.addStoneDebris(
               i * this.squareSize + this.squareSize / 2,
               j * this.squareSize + this.squareSize / 2,
@@ -690,7 +756,6 @@ class PongWarsGame {
           this.physics.checkPaddleCollision(ball, this.leftPaddle, this.rightPaddle, true, (paddle, enemyPaddle, b) => {
             this.dayCombo = 0;
             this.sound.playPaddleHit(false);
-            this.particles.shake(6, 3);
             this.particles.addShockwave(paddle.x, paddle.y, this.theme.dayColor, 35);
             this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#FFD700', 8);
             this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
@@ -699,7 +764,6 @@ class PongWarsGame {
           this.physics.checkPaddleCollision(ball, this.rightPaddle, this.leftPaddle, false, (paddle, enemyPaddle, b) => {
             this.nightCombo = 0;
             this.sound.playPaddleHit(false);
-            this.particles.shake(6, 3);
             this.particles.addShockwave(paddle.x, paddle.y, this.theme.nightColor, 35);
             this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#7000FF', 8);
             this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
@@ -720,12 +784,22 @@ class PongWarsGame {
           if (ball.lifetime <= 0) this.balls.splice(bIdx, 1);
         }
 
-        this.physics.applyRandomness(ball, 3, 14);
+        this.physics.applyRandomness(ball, 2.4, 11.2);
       }
     }
 
     this.calculateTerritory();
     this.particles.update();
+  }
+
+  hasReachedWinTerritory() {
+    if (!this.totalSquares) return false;
+    const dayRatio = this.dayScore / this.totalSquares;
+    const nightRatio = this.nightScore / this.totalSquares;
+    if (this.timeLimit === 0) {
+      return dayRatio >= DEATHMATCH_WIN_RATIO || nightRatio >= DEATHMATCH_WIN_RATIO;
+    }
+    return this.dayScore === this.totalSquares || this.nightScore === this.totalSquares;
   }
 
   endGame() {
@@ -734,6 +808,25 @@ class PongWarsGame {
     this.sound.playVictory(dayWon);
     this.particles.shake(20, 10);
     this.particles.addShockwave(this.width / 2, this.height / 2, dayWon ? this.theme.dayColor : this.theme.nightColor, 200);
+  }
+
+  roundedRectPath(x, y, width, height, radius) {
+    const ctx = this.ctx;
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, width, height, radius);
+      return;
+    }
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.arcTo(x + width, y, x + width, y + r, r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.arcTo(x + width, y + height, x + width - r, y + height, r);
+    ctx.lineTo(x + r, y + height);
+    ctx.arcTo(x, y + height, x, y + height - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
   }
 
   draw() {
@@ -864,7 +957,7 @@ class PongWarsGame {
       this.ctx.restore();
     });
 
-    // 3. Draw Paddles & Player Side Pointers
+    // 3. Draw Paddles
     if (this.mode !== 'sim') {
       [this.leftPaddle, this.rightPaddle].forEach(p => {
         this.ctx.save();
@@ -884,7 +977,7 @@ class PongWarsGame {
         const radius = p.width / 2;
 
         this.ctx.beginPath();
-        this.ctx.roundRect(rx, ry, p.width, p.height, radius);
+        this.roundedRectPath(rx, ry, p.width, p.height, radius);
         this.ctx.fill();
 
         // Laser Core when ready
@@ -902,33 +995,6 @@ class PongWarsGame {
           this.ctx.lineTo(p.isLeft ? this.width : 0, p.y);
           this.ctx.stroke();
           this.ctx.setLineDash([]);
-        }
-
-        // Draw "YOU" Pointer if this is the player's controlled paddle!
-        const isMyPaddle = (this.mode === 'pve' && p.isLeft) ||
-                           (this.mode === 'lan' && ((this.playerSide === 'day' && p.isLeft) || (this.playerSide === 'night' && !p.isLeft)));
-
-        if (isMyPaddle) {
-          const pointerX = p.isLeft ? p.x + 22 : p.x - 22;
-          const arrowDir = p.isLeft ? -1 : 1;
-          const floatOffset = Math.sin(Date.now() / 200) * 3;
-
-          this.ctx.fillStyle = '#FFD700';
-          this.ctx.shadowColor = '#FFD700';
-          this.ctx.shadowBlur = 8;
-          
-          // Draw mini pointer arrow
-          this.ctx.beginPath();
-          this.ctx.moveTo(pointerX + (arrowDir * floatOffset), p.y);
-          this.ctx.lineTo(pointerX + (arrowDir * (floatOffset + 8)), p.y - 5);
-          this.ctx.lineTo(pointerX + (arrowDir * (floatOffset + 8)), p.y + 5);
-          this.ctx.closePath();
-          this.ctx.fill();
-
-          // Small "YOU" badge
-          this.ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, sans-serif';
-          this.ctx.textAlign = p.isLeft ? 'left' : 'right';
-          this.ctx.fillText("YOU", pointerX + (arrowDir > 0 ? -12 : 12), p.y + 3.5);
         }
 
         this.ctx.restore();
