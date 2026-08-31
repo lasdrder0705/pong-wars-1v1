@@ -5,53 +5,53 @@
 const THEMES = {
   classic: {
     name: '宣纸水墨 (Rice Paper)',
-    dayColor: '#F2EDE2',
+    dayColor: '#FAF7F0',
     dayBall: '#141414', // 墨珠
-    dayAccent: '#2B2620',
-    nightColor: '#26221B',
+    dayAccent: '#1C1812',
+    nightColor: '#16130F',
     nightBall: '#FFFFFF', // 白丸
     nightAccent: '#8A8175',
-    bg: 'linear-gradient(160deg, #F7F3E9 0%, #ECE5D3 100%)'
+    bg: 'linear-gradient(160deg, #F9F5EA 0%, #EDE6D4 100%)'
   },
   cyberpunk: {
     name: '浓墨重峦 (Heavy Ink)',
-    dayColor: '#E7E0CF',
-    dayBall: '#141414',
-    dayAccent: '#17140F',
-    nightColor: '#12100C',
+    dayColor: '#F5F1E6',
+    dayBall: '#0D0D0D',
+    dayAccent: '#100E0A',
+    nightColor: '#0D0B08',
     nightBall: '#FFFFFF',
     nightAccent: '#6E675C',
-    bg: 'linear-gradient(160deg, #F2EDE0 0%, #E2D9C2 100%)'
+    bg: 'linear-gradient(160deg, #F3EEE0 0%, #E3DAC3 100%)'
   },
   elemental: {
     name: '淡墨远山 (Light Ink)',
-    dayColor: '#EFEDE7',
-    dayBall: '#141414',
-    dayAccent: '#4A463E',
-    nightColor: '#4A463E',
+    dayColor: '#F6F4EE',
+    dayBall: '#1A1A1A',
+    dayAccent: '#454138',
+    nightColor: '#454138',
     nightBall: '#FFFFFF',
     nightAccent: '#A39C8D',
-    bg: 'linear-gradient(160deg, #F8F6F0 0%, #EAE8E0 100%)'
+    bg: 'linear-gradient(160deg, #FAF8F2 0%, #ECEAE2 100%)'
   },
   void: {
     name: '夜池墨影 (Night Pond)',
-    dayColor: '#DCD7C9',
-    dayBall: '#141414',
-    dayAccent: '#242019',
-    nightColor: '#1A1712',
+    dayColor: '#E8E4D8',
+    dayBall: '#0F0F0F',
+    dayAccent: '#1E1B15',
+    nightColor: '#100E0A',
     nightBall: '#FFFFFF',
     nightAccent: '#5C564C',
-    bg: 'linear-gradient(160deg, #2A251D 0%, #17140F 100%)'
+    bg: 'linear-gradient(160deg, #24201A 0%, #12100C 100%)'
   },
   monochrome: {
     name: '极简黑白 (Monochrome)',
-    dayColor: '#F5F5F7',
-    dayBall: '#141414',
-    dayAccent: '#3A3A3C',
-    nightColor: '#1D1D1F',
+    dayColor: '#FBFBFD',
+    dayBall: '#0E0E10',
+    dayAccent: '#2E2E30',
+    nightColor: '#141416',
     nightBall: '#FFFFFF',
     nightAccent: '#86868B',
-    bg: 'linear-gradient(160deg, #FAFAFA 0%, #E8E8EA 100%)'
+    bg: 'linear-gradient(160deg, #FCFCFC 0%, #EAEAEC 100%)'
   }
 };
 

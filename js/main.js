@@ -597,14 +597,28 @@ document.addEventListener('DOMContentLoaded', () => {
     applyMobileLayout();
   }
 
-  restartBtn.addEventListener('click', () => {
+  function restartCurrentGame() {
     unlockAudio();
-    if (game.mode !== 'lan') { tryEnterGameFullscreen(); startNewGame(); }
-  });
-  modalRestartBtn.addEventListener('click', () => {
-    unlockAudio();
-    if (game.mode !== 'lan') { tryEnterGameFullscreen(); startNewGame(); }
-  });
+    if (game.mode === 'lan') {
+      // 联机模式：通知对方并双方同时重开
+      gameOverModal.classList.remove('show');
+      if (startOverlay) startOverlay.classList.remove('show');
+      tryEnterGameFullscreen();
+      if (game.network && typeof game.network.sendRestartGame === 'function') {
+        game.network.sendRestartGame();
+      } else {
+        startNewGame();
+      }
+      updatePauseUI();
+      applyMobileLayout();
+      return;
+    }
+    tryEnterGameFullscreen();
+    startNewGame();
+  }
+
+  restartBtn.addEventListener('click', restartCurrentGame);
+  modalRestartBtn.addEventListener('click', restartCurrentGame);
 
   // ====== 开局倒计时 / 移动端全屏横屏 / 挡板控制区 ======
   const startOverlay = document.getElementById('startOverlay');
@@ -669,6 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
     game.sound.init();
     if (countdownRunning) return;
     if (startOverlay) startOverlay.classList.remove('show');
+    if (gameOverModal) gameOverModal.classList.remove('show');
     countdownRunning = true;
     game.reset();
     syncGameActive();
@@ -684,8 +699,11 @@ document.addEventListener('DOMContentLoaded', () => {
   async function tryEnterGameFullscreen() {
     if (!isCoarsePointer) return;
     try {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
+      const el = document.documentElement;
+      const hasFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!hasFs) {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
       }
     } catch (_) {}
     try {
@@ -697,14 +715,21 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function exitGameFullscreen() {
-    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch (_) {}
+    try {
+      const hasFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (hasFs) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }
+    } catch (_) {}
     try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
   }
 
   function syncFsClass() {
-    document.body.classList.toggle('real-fs', !!document.fullscreenElement);
+    document.body.classList.toggle('real-fs', !!(document.fullscreenElement || document.webkitFullscreenElement));
   }
   document.addEventListener('fullscreenchange', syncFsClass);
+  document.addEventListener('webkitfullscreenchange', syncFsClass);
 
   if (exitFsBtn) {
     exitFsBtn.addEventListener('click', () => {
@@ -722,44 +747,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 挡板控制区：点按 / 滑动瞬移挡板（映射到棋盘的垂直坐标）
-  function moveMyPaddleTo(clientY) {
-    const rect = canvas.getBoundingClientRect();
-    if (rect.height <= 0) return;
-    const ty = (clientY - rect.top) * (canvas.height / rect.height);
-    const clampY = (p, y) => Math.max(p.height / 2, Math.min(canvas.height - p.height / 2, y));
-    if (game.mode === 'lan') {
-      if (game.playerSide === 'day') {
-        game.leftPaddle.y = clampY(game.leftPaddle, ty);
-        game.network.sendPaddleInput(game.leftPaddle.y, 0);
-      } else {
-        game.rightPaddle.y = clampY(game.rightPaddle, ty);
-        game.network.sendPaddleInput(game.rightPaddle.y, 0);
-      }
-    } else if (game.mode === 'pve') {
-      game.leftPaddle.y = clampY(game.leftPaddle, ty);
-    } else if (game.mode === 'pvp') {
-      game.leftPaddle.y = clampY(game.leftPaddle, ty);
-    }
-  }
+  // 挡板控制区：按住「上 / 下」按钮移动挡板（映射为键盘 W / S，全模式通用）
+  const zoneUpBtn = document.getElementById('zoneUpBtn');
+  const zoneDownBtn = document.getElementById('zoneDownBtn');
 
-  if (paddleZone) {
-    paddleZone.addEventListener('touchstart', (e) => {
+  function bindZoneHold(btn, keyCode) {
+    if (!btn) return;
+    const press = (e) => {
       unlockAudio();
-      e.preventDefault();
-      for (let i = 0; i < e.touches.length; i++) moveMyPaddleTo(e.touches[i].clientY);
-    }, { passive: false });
-    paddleZone.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      for (let i = 0; i < e.touches.length; i++) moveMyPaddleTo(e.touches[i].clientY);
-    }, { passive: false });
-
-    // 鼠标同样可用（便于桌面测试）
-    let zoneMouseDown = false;
-    paddleZone.addEventListener('mousedown', (e) => { zoneMouseDown = true; moveMyPaddleTo(e.clientY); });
-    window.addEventListener('mousemove', (e) => { if (zoneMouseDown) moveMyPaddleTo(e.clientY); });
-    window.addEventListener('mouseup', () => { zoneMouseDown = false; });
+      if (e && e.cancelable) e.preventDefault();
+      game.keys[keyCode] = true;
+      btn.classList.add('held');
+    };
+    const release = () => {
+      game.keys[keyCode] = false;
+      btn.classList.remove('held');
+    };
+    btn.addEventListener('touchstart', press, { passive: false });
+    btn.addEventListener('touchend', release);
+    btn.addEventListener('touchcancel', release);
+    btn.addEventListener('mousedown', press);
+    btn.addEventListener('mouseup', release);
+    btn.addEventListener('mouseleave', release);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+  bindZoneHold(zoneUpBtn, 'KeyW');
+  bindZoneHold(zoneDownBtn, 'KeyS');
 
   // Main UI update loop
   let lastFrameTime = performance.now();

@@ -8,9 +8,9 @@
     name="description"
     content="基于网格碰撞与领地争夺的双人实时对战游戏软件 V1.0，支持局域网联机、双人同屏、智能 AI 挑战与自动演化观战。"
   />
-  <link rel="stylesheet" href="style.css?v=20260831d" />
+  <link rel="stylesheet" href="style.css?v=20260831f" />
   <!-- WebRTC P2P Signaling Broker -->
-  <script src="vendor/peerjs.min.js?v=20260831d"></script>
+  <script src="vendor/peerjs.min.js?v=20260831f"></script>
 </head>
 <body>
 
@@ -232,18 +232,35 @@
       <div class="countdown-overlay" id="countdownOverlay">
         <span class="countdown-num" id="countdownText">3</span>
       </div>
+
+      <!-- 竖屏提示：移动端开局后请旋转横屏 -->
+      <div class="rotate-hint" id="rotateHint">
+        <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="2" width="10" height="20" rx="2" transform="rotate(90 12 12)"></rect>
+          <polyline points="8 9 5 12 8 15"></polyline>
+          <polyline points="16 9 19 12 16 15"></polyline>
+        </svg>
+        <span>请旋转手机 · 横屏开战</span>
+      </div>
     </div>
 
-    <!-- 移动端横屏：左侧挡板控制区 -->
+    <!-- 移动端横屏：左侧挡板控制区（按住上/下按钮移动挡板） -->
     <div class="touch-zone" id="paddleZone" aria-hidden="true">
-      <div class="zone-hint">
-        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="12" y1="3" x2="12" y2="21"></line>
-          <polyline points="7 8 12 3 17 8"></polyline>
-          <polyline points="7 16 12 21 17 16"></polyline>
+      <button class="zone-btn" id="zoneUpBtn" type="button" aria-label="挡板上移">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 15 12 8 18 15"></polyline>
         </svg>
-        <span>挡板控制区<br />点按 · 滑动瞬移</span>
+        <span>上</span>
+      </button>
+      <div class="zone-hint">
+        <span>挡板控制<br />按住移动</span>
       </div>
+      <button class="zone-btn" id="zoneDownBtn" type="button" aria-label="挡板下移">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 16 18 9"></polyline>
+        </svg>
+        <span>下</span>
+      </button>
     </div>
 
     <!-- Mobile Virtual Action Buttons -->
@@ -468,12 +485,12 @@
   </footer>
 
   <!-- Scripts -->
-  <script src="js/audio.js?v=20260831d"></script>
-  <script src="js/particles.js?v=20260831d"></script>
-  <script src="js/physics.js?v=20260831d"></script>
-  <script src="js/ai.js?v=20260831d"></script>
-  <script src="js/network.js?v=20260831d"></script>
-  <script src="js/game.js?v=20260831d"></script>
-  <script src="js/main.js?v=20260831d"></script>
+  <script src="js/audio.js?v=20260831f"></script>
+  <script src="js/particles.js?v=20260831f"></script>
+  <script src="js/physics.js?v=20260831f"></script>
+  <script src="js/ai.js?v=20260831f"></script>
+  <script src="js/network.js?v=20260831f"></script>
+  <script src="js/game.js?v=20260831f"></script>
+  <script src="js/main.js?v=20260831f"></script>
 </body>
 </html>

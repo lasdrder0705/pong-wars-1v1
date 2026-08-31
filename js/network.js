@@ -212,6 +212,16 @@ class NetworkManager {
     this.startHostSync();
   }
 
+  // 联机"再来一局"：通知对方重开，并本地重开。
+  sendRestartGame() {
+    if (!this.isOnline || !this._matchStarted) return false;
+    this._send({ type: 'restart_game' });
+    this._resetPaddleInputState();
+    this.game.start();
+    if (this.isHost) this.startHostSync();
+    return true;
+  }
+
   async createRoom(_customCode, callback) {
     const wsOk = await this._ensureWs();
     if (wsOk) {
@@ -337,6 +347,15 @@ class NetworkManager {
       if (this.onSideAssigned) this.onSideAssigned(this.mySide);
       this._status('connected', '对战开始！');
       this.game.start();
+      return;
+    }
+
+    if (data.type === 'restart_game') {
+      // 任一端发起"再来一局"：双方都重开。start 本身不会再发消息，不会循环。
+      if (!this.isOnline || !this._matchStarted) return;
+      this._resetPaddleInputState();
+      this.game.start();
+      if (this.isHost) this.startHostSync();
       return;
     }
 

@@ -641,16 +641,18 @@ canvas {
 }
 
 .action-btn {
-  background: var(--paper-card);
-  border: 1px solid var(--border-strong);
+  background: rgba(253, 251, 246, 0.96);
+  border: 2px solid #1D1A15;
+  outline: 1px solid rgba(29, 26, 21, 0.35);
+  outline-offset: 2px;
   color: var(--ink-0);
   padding: 14px 10px;
   min-height: 58px;
   border-radius: var(--radius-md);
   font-family: var(--serif);
   font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 2px;
+  font-weight: 700;
+  letter-spacing: 3px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -659,7 +661,7 @@ canvas {
   position: relative;
   transition: var(--transition);
   touch-action: manipulation;
-  box-shadow: 0 2px 8px rgba(36, 32, 25, 0.1);
+  box-shadow: 0 3px 10px rgba(29, 26, 21, 0.14);
 }
 
 .action-btn:active:not(:disabled) {
@@ -1094,21 +1096,76 @@ body.game-active.landscape-mode .touch-zone {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 14px;
+  padding: 10px 8px;
   border-right: 1px dashed rgba(36, 32, 25, 0.35);
   background: rgba(252, 250, 244, 0.4);
   touch-action: none;
 }
 
-.touch-zone .zone-hint {
+/* 上 / 下 挡板按钮：水墨白底墨框，大号拇指热区 */
+.touch-zone .zone-btn {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  color: rgba(36, 32, 25, 0.5);
-  font-size: 0.75rem;
-  letter-spacing: 2px;
-  text-align: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(86%, 170px);
+  min-height: 108px;
+  border-radius: 18px;
+  border: 2.5px solid #1c1812;
+  outline: 1px solid rgba(28, 24, 18, 0.4);
+  outline-offset: 3px;
+  background: rgba(253, 251, 246, 0.95);
+  color: #1c1812;
+  font-size: 1.1rem;
+  letter-spacing: 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.touch-zone .zone-btn svg {
+  width: 34px;
+  height: 34px;
+}
+
+.touch-zone .zone-btn.held,
+.touch-zone .zone-btn:active {
+  background: #1c1812;
+  color: #f7f3ea;
+  transform: scale(0.96);
+}
+
+.touch-zone .zone-hint {
+  display: none;
+}
+
+/* 竖屏提示：开局后未横屏时显示 */
+.rotate-hint {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 45;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1.5px solid #1c1812;
+  background: rgba(253, 251, 246, 0.95);
+  color: #1c1812;
+  font-size: 0.78rem;
+  letter-spacing: 1.5px;
   pointer-events: none;
+  white-space: nowrap;
+}
+
+body.game-active:not(.landscape-mode) .rotate-hint {
+  display: flex;
 }
 
 /* 右侧技能区：两个大按钮 */
