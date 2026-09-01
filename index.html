@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <script>
+    // 全局错误兜底横幅：任何脚本错误都会以可见横幅呈现，便于截图反馈
+    (function () {
+      window.addEventListener('error', function (e) {
+        if (document.getElementById('jsErrBanner') || !e.message) return;
+        var b = document.createElement('div');
+        b.id = 'jsErrBanner';
+        b.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;z-index:99999;background:rgba(140,30,30,0.95);color:#fff;padding:10px 14px;border-radius:10px;font-size:12px;line-height:1.5;word-break:break-all;';
+        b.textContent = '页面脚本错误，请截图反馈：' + e.message + ' @ ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0);
+        (document.body || document.documentElement).appendChild(b);
+      }, true);
+    })();
+  </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>昼夜领地对战 V1.0</title>
@@ -8,9 +21,9 @@
     name="description"
     content="基于网格碰撞与领地争夺的双人实时对战游戏软件 V1.0，支持局域网联机、双人同屏、智能 AI 挑战与自动演化观战。"
   />
-  <link rel="stylesheet" href="style.css?v=20260831i" />
+  <link rel="stylesheet" href="style.css?v=20260902a" />
   <!-- WebRTC P2P Signaling Broker -->
-  <script src="vendor/peerjs.min.js?v=20260831i"></script>
+  <script src="vendor/peerjs.min.js?v=20260902a"></script>
 </head>
 <body>
 
@@ -485,12 +498,30 @@
   </footer>
 
   <!-- Scripts -->
-  <script src="js/audio.js?v=20260831i"></script>
-  <script src="js/particles.js?v=20260831i"></script>
-  <script src="js/physics.js?v=20260831i"></script>
-  <script src="js/ai.js?v=20260831i"></script>
-  <script src="js/network.js?v=20260831i"></script>
-  <script src="js/game.js?v=20260831i"></script>
-  <script src="js/main.js?v=20260831i"></script>
+  <script src="js/audio.js?v=20260902a"></script>
+  <script src="js/particles.js?v=20260902a"></script>
+  <script src="js/physics.js?v=20260902a"></script>
+  <script src="js/ai.js?v=20260902a"></script>
+  <script src="js/network.js?v=20260902a"></script>
+  <script src="js/game.js?v=20260902a"></script>
+  <script src="js/main.js?v=20260902a"></script>
+<script>
+  // 构建版本自检：若 main.js 是缓存旧版（未上报标记），强制带新参数刷新一次
+  (function () {
+    var EXPECTED = '20260902a';
+    if (window.__APP_BUILD__ !== EXPECTED) {
+      try {
+        var u = new URL(location.href);
+        if (u.searchParams.get('r') !== EXPECTED && !sessionStorage.getItem('buildReloaded')) {
+          sessionStorage.setItem('buildReloaded', EXPECTED);
+          u.searchParams.set('r', EXPECTED);
+          location.replace(u.toString());
+        }
+      } catch (e) { location.reload(); }
+    } else {
+      try { sessionStorage.removeItem('buildReloaded'); } catch (e) {}
+    }
+  })();
+</script>
 </body>
 </html>

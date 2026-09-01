@@ -2,6 +2,9 @@
  * UI Wiring, Event Listeners, and Game Lifecycle Controller
  */
 
+// 构建标记：index.html 用来自检缓存版本是否一致
+window.__APP_BUILD__ = '20260902a';
+
 document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('pongCanvas');
   const game = new PongWarsGame(canvas, {
