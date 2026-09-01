@@ -1,204 +1,469 @@
 /**
- * WebRTC P2P and Local Network Manager for Pong Wars 1v1
+ * LAN WebSocket relay (preferred on same Wi-Fi) + PeerJS internet fallback.
  */
+
+const PADDLE_INPUT_INTERVAL_MS = 1000 / 30;
+const PADDLE_INPUT_KEEPALIVE_MS = 250;
 
 class NetworkManager {
   constructor(game) {
     this.game = game;
     this.peer = null;
     this.conn = null;
+    this.ws = null;
+    this.transport = null;
+    this.preferredWsUrl = null;
     this.isHost = false;
     this.isOnline = false;
-    this.mySide = 'day'; // 'day' (left) or 'night' (right)
+    this.mySide = 'day';
     this.roomCode = null;
     this.onStatusChange = null;
     this.onSideAssigned = null;
     this.syncInterval = null;
+    this._wsWaiters = [];
+    this._matchStarted = false;
+    this._lastPaddleInputAt = -Infinity;
+    this._lastPaddleInput = null;
+    this._now = () => Date.now();
   }
 
-  // Generate a friendly 4-digit room code
   generateRoomCode() {
     return Math.floor(1000 + Math.random() * 9000).toString();
   }
 
-  // Create room as Host
-  createRoom(customCode, callback) {
-    const code = customCode || this.generateRoomCode();
-    const peerId = `pw1v1-${code}`;
+  setRelayHost(host, port) {
+    const raw = String(host || '').trim().replace(/^https?:\/\//i, '');
+    const hostOnly = raw.split('/')[0].split(':')[0];
+    if (!hostOnly) return false;
+    const p = Number(port) || 8080;
+    this.preferredWsUrl = `ws://${hostOnly}:${p}/ws`;
+    return true;
+  }
 
-    if (this.peer) this.peer.destroy();
+  shouldUseSecureSameOriginRelay() {
+    if (typeof location === 'undefined') return false;
+    return location.protocol === 'https:' &&
+      location.hostname !== 'appassets.androidplatform.net';
+  }
 
-    // Connect to PeerJS cloud broker (free public signaling for WebRTC)
-    this.peer = new Peer(peerId, {
-      debug: 1
-    });
+  useSameOriginRelay() {
+    this.preferredWsUrl = null;
+    return this._wsUrl();
+  }
 
-    this.peer.on('open', (id) => {
-      this.isHost = true;
-      this.isOnline = true;
-      this.roomCode = code;
-      if (this.onStatusChange) this.onStatusChange('waiting', `房间已创建！房间码：${code}，等待对手加入...`);
-      if (callback) callback(null, code);
-    });
+  _status(kind, msg) {
+    if (this.onStatusChange) this.onStatusChange(kind, msg);
+  }
 
-    this.peer.on('connection', (conn) => {
-      this.conn = conn;
-      this.setupConnection();
+  _send(data) {
+    if (this.transport === 'ws' && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'relay', data }));
+      return true;
+    }
+    if (this.conn && this.conn.open) {
+      this.conn.send(data);
+      return true;
+    }
+    return false;
+  }
 
-      // Host randomly assigns sides! (50% chance Host is Day, 50% chance Host is Night)
-      const hostIsDay = Math.random() < 0.5;
-      this.mySide = hostIsDay ? 'day' : 'night';
-      const clientSide = hostIsDay ? 'night' : 'day';
+  _resetPaddleInputState() {
+    this._lastPaddleInputAt = -Infinity;
+    this._lastPaddleInput = null;
+  }
 
-      this.game.playerSide = this.mySide;
-      this.game.isOnline = true;
-      this.game.isHost = true;
+  _wsUrl() {
+    if (this.preferredWsUrl) return this.preferredWsUrl;
+    if (typeof location === 'undefined') return null;
+    if (location.protocol === 'file:') return null;
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return null;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${location.host}/ws`;
+  }
 
-      // Send initial handoff to client
-      setTimeout(() => {
-        if (this.conn && this.conn.open) {
-          this.conn.send({
-            type: 'init_game',
-            yourSide: clientSide,
-            hostSide: this.mySide,
-            theme: this.game.currentThemeKey,
-            timeLimit: this.game.timeLimit,
-            squareSize: this.game.squareSize
-          });
+  async _ensureWs(timeoutMs = 1600) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return true;
+    const url = this._wsUrl();
+    if (!url) return false;
 
-          if (this.onSideAssigned) this.onSideAssigned(this.mySide);
-          if (this.onStatusChange) this.onStatusChange('connected', `对手已加入！对决开始！`);
-          
-          this.game.start();
-          this.startHostSync();
+    return new Promise((resolve) => {
+      let settled = false;
+      let ws;
+      try {
+        ws = new WebSocket(url);
+      } catch (_) {
+        resolve(false);
+        return;
+      }
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (ok) {
+          this.ws = ws;
+          this.transport = 'ws';
+          ws.onmessage = (ev) => this._onWsMessage(ev);
+          ws.onclose = () => this._onTransportClose();
+          ws.onerror = () => {};
+        } else {
+          try { ws.close(); } catch (_) {}
         }
-      }, 500);
-    });
-
-    this.peer.on('error', (err) => {
-      console.warn('Peer error:', err);
-      if (this.onStatusChange) this.onStatusChange('error', `联机错误：${err.type || err.message}`);
-      if (callback) callback(err);
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      ws.onopen = () => finish(true);
+      ws.onerror = () => finish(false);
     });
   }
 
-  // Join room as Client
-  joinRoom(code, callback) {
-    const targetPeerId = `pw1v1-${code.trim()}`;
+  _onWsMessage(ev) {
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch (_) {
+      return;
+    }
+    this.handleRelayMessage(msg);
+  }
 
-    if (this.peer) this.peer.destroy();
+  handleRelayMessage(msg) {
+    if (!msg || typeof msg !== 'object' || !msg.type) return;
 
-    this.peer = new Peer({
-      debug: 1
+    if (msg.type === 'created') {
+      this.roomCode = msg.code;
+      this.isHost = true;
+      this.isOnline = true;
+      this._status('waiting', `房间已创建。房间码：${msg.code}，等待对手加入…`);
+      this._flushWaiters(null, msg.code);
+      return;
+    }
+    if (msg.type === 'joined') {
+      this.roomCode = msg.code;
+      this.isHost = false;
+      this.isOnline = true;
+      this._status('connected', '已连上房主，等待阵营分配…');
+      this._flushWaiters(null);
+      return;
+    }
+    if (msg.type === 'error') {
+      this._status('error', msg.message || '联机错误');
+      this._flushWaiters(new Error(msg.message || 'error'));
+      return;
+    }
+    if (msg.type === 'peer_joined' && this.isHost) {
+      this._beginMatch();
+      return;
+    }
+    if (msg.type === 'peer_left') {
+      this._handlePeerUnavailable('对手已断开连接。');
+      return;
+    }
+    if (msg.type === 'relay' && msg.data) {
+      this.handleIncomingData(msg.data);
+    }
+  }
+
+  _flushWaiters(err, code) {
+    const waiters = this._wsWaiters.splice(0);
+    waiters.forEach((cb) => cb(err, code));
+  }
+
+  _onTransportClose() {
+    if (!this.isOnline) return;
+    this._handlePeerUnavailable('连接已断开。');
+  }
+
+  _handlePeerUnavailable(message) {
+    this.isOnline = false;
+    this._matchStarted = false;
+    this.stopHostSync();
+    this._status('disconnected', message);
+    this.game.isOnline = false;
+    this.game.setPaused(true);
+  }
+
+  _beginMatch() {
+    if (this._matchStarted) return;
+    this._matchStarted = true;
+    this.isOnline = true;
+
+    const hostIsDay = Math.random() < 0.5;
+    this.mySide = hostIsDay ? 'day' : 'night';
+    const clientSide = hostIsDay ? 'night' : 'day';
+
+    this.game.playerSide = this.mySide;
+    this.game.isOnline = true;
+    this.game.isHost = true;
+    this.game.mode = 'lan';
+    this._resetPaddleInputState();
+
+    this._send({
+      type: 'init_game',
+      yourSide: clientSide,
+      hostSide: this.mySide,
+      theme: this.game.currentThemeKey,
+      timeLimit: this.game.timeLimit,
+      squareSize: this.game.squareSize
     });
+
+    if (this.onSideAssigned) this.onSideAssigned(this.mySide);
+    this._status('connected', '对手已加入，对决开始！');
+    this.game.start();
+    this.startHostSync();
+  }
+
+  // 联机"再来一局"：通知对方重开，并本地重开。
+  sendRestartGame() {
+    if (!this.isOnline || !this._matchStarted) return false;
+    this._send({ type: 'restart_game' });
+    this._resetPaddleInputState();
+    this.game.start();
+    if (this.isHost) this.startHostSync();
+    return true;
+  }
+
+  async createRoom(_customCode, callback) {
+    const wsOk = await this._ensureWs();
+    if (wsOk) {
+      this._wsWaiters.push(callback || (() => {}));
+      this.ws.send(JSON.stringify({ type: 'create' }));
+      return;
+    }
+    // WS 中继不可用（如纯静态托管）时，回退到互联网 P2P（PeerJS 公共代理，WebRTC 加密）。
+    this._createPeerRoom(callback);
+  }
+
+  async joinRoom(code, callback) {
+    const trimmed = String(code || '').trim();
+    const wsOk = await this._ensureWs();
+    if (wsOk) {
+      this._wsWaiters.push(callback || (() => {}));
+      this.ws.send(JSON.stringify({ type: 'join', code: trimmed }));
+      return;
+    }
+    // WS 中继不可用（如纯静态托管）时，回退到互联网 P2P。
+    this._joinPeerRoom(trimmed, callback);
+  }
+
+  _createPeerRoom(callback) {
+    if (typeof Peer === 'undefined') {
+      this._status('error', '局域网服务未连接，且无法使用互联网 P2P。请先在电脑运行 node server.js，并填写电脑 IP。');
+      if (callback) callback(new Error('no-peer'));
+      return;
+    }
+
+    const tryCode = (attempt) => {
+      const code = this.generateRoomCode();
+      if (this.peer) {
+        try { this.peer.destroy(); } catch (_) {}
+      }
+      this.peer = new Peer(`pw1v1-${code}`, { debug: 0 });
+      this.transport = 'peer';
+
+      this.peer.on('open', () => {
+        this.isHost = true;
+        this.isOnline = true;
+        this.roomCode = code;
+        this._status('waiting', `房间已创建（互联网 P2P）。房间码：${code}，等待对手加入…`);
+        if (callback) callback(null, code);
+      });
+
+      this.peer.on('connection', (conn) => {
+        this.conn = conn;
+        this.setupConnection();
+        this._matchStarted = false;
+        if (conn.open) this._beginMatch();
+        else conn.on('open', () => this._beginMatch());
+      });
+
+      this.peer.on('error', (err) => {
+        if (err && err.type === 'unavailable-id' && attempt < 5) {
+          tryCode(attempt + 1);
+          return;
+        }
+        this._status('error', `联机错误：${(err && (err.type || err.message)) || 'unknown'}`);
+        if (callback) callback(err);
+      });
+    };
+
+    tryCode(0);
+  }
+
+  _joinPeerRoom(code, callback) {
+    if (typeof Peer === 'undefined') {
+      this._status('error', '加入失败：请先用 node server.js 启动局域网服务，或检查网络。');
+      if (callback) callback(new Error('no-peer'));
+      return;
+    }
+    if (this.peer) {
+      try { this.peer.destroy(); } catch (_) {}
+    }
+    this.peer = new Peer({ debug: 0 });
+    this.transport = 'peer';
 
     this.peer.on('open', () => {
       this.isHost = false;
       this.isOnline = true;
       this.roomCode = code;
-      if (this.onStatusChange) this.onStatusChange('connecting', `正在连接房间 ${code}...`);
-
-      const conn = this.peer.connect(targetPeerId, {
-        reliable: true
-      });
-
+      this._status('connecting', `正在连接房间 ${code}…`);
+      const conn = this.peer.connect(`pw1v1-${code}`, { reliable: true });
       this.conn = conn;
       this.setupConnection();
-
       conn.on('open', () => {
-        if (this.onStatusChange) this.onStatusChange('connected', `已成功连接到房主！等待阵营分配...`);
+        this._status('connected', '已连上房主，等待阵营分配…');
         if (callback) callback(null);
       });
     });
 
     this.peer.on('error', (err) => {
-      console.warn('Join error:', err);
-      if (this.onStatusChange) this.onStatusChange('error', `加入房间失败，请检查房间码是否正确。`);
+      this._status('error', '加入房间失败，请检查房间码，或改用电脑 IP 局域网模式。');
       if (callback) callback(err);
     });
   }
 
   setupConnection() {
-    this.conn.on('data', (data) => {
-      this.handleIncomingData(data);
-    });
-
-    this.conn.on('close', () => {
-      this.isOnline = false;
-      this.stopHostSync();
-      if (this.onStatusChange) this.onStatusChange('disconnected', `对手已断开连接。`);
-      this.game.pause();
-    });
+    if (!this.conn) return;
+    this.conn.on('data', (data) => this.handleIncomingData(data));
+    this.conn.on('close', () => this._onTransportClose());
   }
 
-  // Handle incoming network packet
   handleIncomingData(data) {
     if (!data || !data.type) return;
 
     if (data.type === 'init_game') {
-      // Client receives side assignment
+      if (this.isHost) return;
+      if (data.yourSide !== 'day' && data.yourSide !== 'night') return;
       this.mySide = data.yourSide;
+      this.isOnline = true;
+      this._matchStarted = true;
       this.game.playerSide = this.mySide;
       this.game.isOnline = true;
       this.game.isHost = false;
-
+      this.game.mode = 'lan';
+      this._resetPaddleInputState();
       if (data.theme) this.game.setTheme(data.theme);
+      if (data.timeLimit != null) this.game.setTimeLimit(data.timeLimit);
+      if (data.squareSize != null) this.game.setGridSize(data.squareSize);
       if (this.onSideAssigned) this.onSideAssigned(this.mySide);
-      if (this.onStatusChange) this.onStatusChange('connected', `对战开始！`);
-
+      this._status('connected', '对战开始！');
       this.game.start();
-    } else if (data.type === 'paddle_input') {
-      // Receive remote paddle Y position
-      if (this.mySide === 'day') {
-        this.game.rightPaddle.y = data.y;
-        this.game.rightPaddle.vy = data.vy || 0;
-      } else {
-        this.game.leftPaddle.y = data.y;
-        this.game.leftPaddle.vy = data.vy || 0;
-      }
-    } else if (data.type === 'action_skill') {
-      // Remote player triggered normal skill
-      if (data.side === 'day') {
-        this.game.activateSolarFlare();
-      } else {
-        this.game.activateEclipse();
-      }
-    } else if (data.type === 'action_laser') {
-      // Remote player triggered laser ultimate
-      this.game.activateLaser(data.side === 'day');
-    } else if (data.type === 'game_state_sync' && !this.isHost) {
-      // Client receives authoritative state sync from Host
+      return;
+    }
+
+    if (data.type === 'restart_game') {
+      // 任一端发起"再来一局"：双方都重开。start 本身不会再发消息，不会循环。
+      if (!this.isOnline || !this._matchStarted) return;
+      this._resetPaddleInputState();
+      this.game.start();
+      if (this.isHost) this.startHostSync();
+      return;
+    }
+
+    if (data.type === 'paddle_input') {
+      if (!this.isHost || !Number.isFinite(data.y)) return;
+      const remoteSide = this.mySide === 'day' ? 'night' : 'day';
+      const paddle = remoteSide === 'day'
+        ? this.game.leftPaddle
+        : this.game.rightPaddle;
+      paddle.y = Math.max(
+        paddle.height / 2,
+        Math.min(this.game.height - paddle.height / 2, data.y)
+      );
+      const allowedSpeed = paddle.frozenTimer > 0
+        ? paddle.speed * 0.45
+        : paddle.speed;
+      paddle.vy = Number.isFinite(data.vy)
+        ? Math.max(-allowedSpeed, Math.min(allowedSpeed, data.vy))
+        : 0;
+      return;
+    }
+
+    if (data.type === 'action_skill') {
+      const remoteSide = this.mySide === 'day' ? 'night' : 'day';
+      if (!this.isHost || data.side !== remoteSide) return;
+      if (data.side === 'day') this.game.activateSolarFlare(true);
+      else this.game.activateEclipse(true);
+      this.sendHostStateNow();
+      return;
+    }
+
+    if (data.type === 'action_laser') {
+      const remoteSide = this.mySide === 'day' ? 'night' : 'day';
+      if (!this.isHost || data.side !== remoteSide) return;
+      this.game.activateLaser(data.side === 'day', true);
+      this.sendHostStateNow();
+      return;
+    }
+
+    if (data.type === 'pause_request') {
+      if (!this.isHost || typeof data.paused !== 'boolean') return;
+      this.game.setPaused(data.paused);
+      this.sendHostStateNow();
+      return;
+    }
+
+    if (data.type === 'game_state_sync' && !this.isHost) {
       this.applyStateSync(data);
     }
   }
 
-  // Host: Broadcast physics state at 30 FPS
   startHostSync() {
     this.stopHostSync();
     this.syncInterval = setInterval(() => {
-      if (this.conn && this.conn.open && this.game.state === 'running') {
-        const syncData = {
-          type: 'game_state_sync',
-          balls: this.game.balls.map(b => ({
-            x: b.x,
-            y: b.y,
-            dx: b.dx,
-            dy: b.dy,
-            team: b.team,
-            penetrationCapacity: b.penetrationCapacity
-          })),
-          leftY: this.game.leftPaddle.y,
-          rightY: this.game.rightPaddle.y,
-          leftEnergy: this.game.leftPaddle.energy,
-          rightEnergy: this.game.rightPaddle.energy,
-          timeLeft: this.game.timeLeft,
-          elapsedSeconds: this.game.elapsedSeconds,
-          squares: this.game.squares,
-          stoneGrid: this.game.stoneGrid
-        };
-        this.conn.send(syncData);
-      }
-    }, 33); // ~30 FPS network sync
+      if (!this.game || !this.isHost || !this.isOnline || !this._matchStarted) return;
+      this.sendHostStateNow();
+    }, 33);
+  }
+
+  createStateSync() {
+    const game = this.game;
+    return {
+      type: 'game_state_sync',
+      state: game.state,
+      balls: game.balls.map((ball) => ({
+        x: ball.x,
+        y: ball.y,
+        dx: ball.dx,
+        dy: ball.dy,
+        team: ball.team,
+        radius: ball.radius,
+        penetrationCapacity: ball.penetrationCapacity,
+        remainingPenetration: ball.remainingPenetration,
+        isExtra: Boolean(ball.isExtra),
+        lifetime: ball.lifetime == null ? null : ball.lifetime
+      })),
+      powerups: game.powerups.map((powerup) => ({
+        type: powerup.type,
+        x: powerup.x,
+        y: powerup.y,
+        radius: powerup.radius,
+        timer: powerup.timer
+      })),
+      leftY: game.leftPaddle.y,
+      rightY: game.rightPaddle.y,
+      leftVy: game.leftPaddle.vy,
+      rightVy: game.rightPaddle.vy,
+      leftEnergy: game.leftPaddle.energy,
+      rightEnergy: game.rightPaddle.energy,
+      leftFrozenTimer: game.leftPaddle.frozenTimer,
+      rightFrozenTimer: game.rightPaddle.frozenTimer,
+      p1SkillCD: game.p1SkillCD,
+      p2SkillCD: game.p2SkillCD,
+      powerupSpawnTimer: game.powerupSpawnTimer,
+      timeLeft: game.timeLeft,
+      elapsedSeconds: game.elapsedSeconds,
+      timerAcc: game.timerAcc,
+      dayCombo: game.dayCombo,
+      nightCombo: game.nightCombo,
+      squares: game.squares,
+      stoneGrid: game.stoneGrid
+    };
+  }
+
+  sendHostStateNow() {
+    if (!this.isHost || !this.isOnline || !this.game) return false;
+    this._send(this.createStateSync());
+    return true;
   }
 
   stopHostSync() {
@@ -208,77 +473,163 @@ class NetworkManager {
     }
   }
 
-  // Client: Apply host state sync
   applyStateSync(data) {
-    if (!data) return;
+    if (!data || typeof data !== 'object') return;
+    const game = this.game;
+    const finite = (value, minimum, maximum) => Number.isFinite(value) &&
+      value >= minimum && value <= maximum;
 
-    if (data.balls && data.balls.length > 0) {
-      for (let i = 0; i < data.balls.length; i++) {
-        if (this.game.balls[i]) {
-          // Smooth lerp / apply
-          this.game.balls[i].x = data.balls[i].x;
-          this.game.balls[i].y = data.balls[i].y;
-          this.game.balls[i].dx = data.balls[i].dx;
-          this.game.balls[i].dy = data.balls[i].dy;
-          this.game.balls[i].penetrationCapacity = data.balls[i].penetrationCapacity;
-        }
-      }
+    if (Array.isArray(data.balls) && data.balls.length <= 16) {
+      const balls = data.balls.map((source) => {
+        if (!source || (source.team !== 'day' && source.team !== 'night')) return null;
+        if (![source.x, source.y, source.dx, source.dy].every(Number.isFinite)) return null;
+        const penetration = finite(source.penetrationCapacity, 1, 3)
+          ? source.penetrationCapacity
+          : 1;
+        const remaining = finite(source.remainingPenetration, 0, 3)
+          ? source.remainingPenetration
+          : penetration;
+        const isDay = source.team === 'day';
+        return {
+          x: source.x,
+          y: source.y,
+          dx: source.dx,
+          dy: source.dy,
+          team: source.team,
+          reverseColor: isDay ? game.theme.dayColor : game.theme.nightColor,
+          ballColor: isDay ? '#141414' : '#FFFFFF',
+          radius: finite(source.radius, 1, game.squareSize)
+            ? source.radius
+            : game.squareSize / 2,
+          penetrationCapacity: penetration,
+          remainingPenetration: remaining,
+          isExtra: Boolean(source.isExtra),
+          lifetime: finite(source.lifetime, 0, 100000) ? source.lifetime : undefined
+        };
+      });
+      if (balls.every(Boolean)) game.balls = balls;
     }
 
-    if (this.mySide === 'night') {
-      this.game.leftPaddle.y = data.leftY;
-    } else {
-      this.game.rightPaddle.y = data.rightY;
+    const powerupTypes = new Set(['bomb', 'multiball', 'freeze', 'speed', 'petrify']);
+    if (Array.isArray(data.powerups) && data.powerups.length <= 8) {
+      const powerups = data.powerups.map((source) => {
+        if (!source || !powerupTypes.has(source.type)) return null;
+        if (![source.x, source.y, source.radius, source.timer].every(Number.isFinite)) return null;
+        return {
+          type: source.type,
+          x: source.x,
+          y: source.y,
+          radius: source.radius,
+          timer: source.timer
+        };
+      });
+      if (powerups.every(Boolean)) game.powerups = powerups;
     }
 
-    this.game.leftPaddle.energy = data.leftEnergy;
-    this.game.rightPaddle.energy = data.rightEnergy;
-    this.game.timeLeft = data.timeLeft;
-    this.game.elapsedSeconds = data.elapsedSeconds;
+    const applyNumber = (target, key, value, minimum, maximum) => {
+      if (finite(value, minimum, maximum)) target[key] = value;
+    };
+    applyNumber(game.leftPaddle, 'y', data.leftY, 0, game.height);
+    applyNumber(game.rightPaddle, 'y', data.rightY, 0, game.height);
+    applyNumber(game.leftPaddle, 'vy', data.leftVy, -100, 100);
+    applyNumber(game.rightPaddle, 'vy', data.rightVy, -100, 100);
+    applyNumber(game.leftPaddle, 'energy', data.leftEnergy, 0, 100);
+    applyNumber(game.rightPaddle, 'energy', data.rightEnergy, 0, 100);
+    applyNumber(game.leftPaddle, 'frozenTimer', data.leftFrozenTimer, 0, 100000);
+    applyNumber(game.rightPaddle, 'frozenTimer', data.rightFrozenTimer, 0, 100000);
+    applyNumber(game, 'p1SkillCD', data.p1SkillCD, 0, 60000);
+    applyNumber(game, 'p2SkillCD', data.p2SkillCD, 0, 60000);
+    applyNumber(game, 'powerupSpawnTimer', data.powerupSpawnTimer, 0, 100000);
+    applyNumber(game, 'timeLeft', data.timeLeft, 0, Math.max(0, game.timeLimit));
+    applyNumber(game, 'elapsedSeconds', data.elapsedSeconds, 0, 86400);
+    applyNumber(game, 'timerAcc', data.timerAcc, 0, 1000);
+    applyNumber(game, 'dayCombo', data.dayCombo, 0, 1000000);
+    applyNumber(game, 'nightCombo', data.nightCombo, 0, 1000000);
 
-    if (data.squares) this.game.squares = data.squares;
-    if (data.stoneGrid) this.game.stoneGrid = data.stoneGrid;
+    const validGrid = (grid, cellValidator) => Array.isArray(grid) &&
+      grid.length === game.gridX &&
+      grid.every((column) => Array.isArray(column) &&
+        column.length === game.gridY && column.every(cellValidator));
+    if (validGrid(
+      data.squares,
+      (cell) => cell === game.theme.dayColor || cell === game.theme.nightColor
+    )) {
+      game.squares = data.squares.map((column) => column.slice());
+    }
+    if (validGrid(data.stoneGrid, (cell) => cell === null || (
+      cell && typeof cell === 'object' &&
+      finite(cell.hp, 0, 10) && finite(cell.maxHp, 1, 10) &&
+      (cell.owner === 'day' || cell.owner === 'night')
+    ))) {
+      game.stoneGrid = data.stoneGrid.map((column) => column.map((cell) =>
+        cell === null ? null : { hp: cell.hp, maxHp: cell.maxHp, owner: cell.owner }
+      ));
+    }
+    if (data.state === 'running' || data.state === 'paused' || data.state === 'gameover') {
+      game.state = data.state;
+    }
     this.game.calculateTerritory();
   }
 
-  // Send local paddle movement to opponent
+  requestPause(paused) {
+    if (typeof paused !== 'boolean') return false;
+    if (!this.isOnline) return this.game.setPaused(paused);
+    if (this.isHost) {
+      this.game.setPaused(paused);
+      this.sendHostStateNow();
+    } else {
+      this._send({ type: 'pause_request', paused });
+    }
+    return true;
+  }
+
   sendPaddleInput(y, vy) {
-    if (this.conn && this.conn.open) {
-      this.conn.send({
-        type: 'paddle_input',
-        y: y,
-        vy: vy
-      });
-    }
+    if (!Number.isFinite(y) || !Number.isFinite(vy)) return false;
+    const measuredNow = Number(this._now());
+    const now = Number.isFinite(measuredNow) ? measuredNow : Date.now();
+    const previous = this._lastPaddleInput;
+    const elapsed = now - this._lastPaddleInputAt;
+    const stopped = previous && previous.vy !== 0 && vy === 0;
+    const changed = !previous || previous.y !== y || previous.vy !== vy;
+
+    if (!stopped && elapsed + 0.000001 < PADDLE_INPUT_INTERVAL_MS) return false;
+    if (!changed && elapsed + 0.000001 < PADDLE_INPUT_KEEPALIVE_MS) return false;
+    if (!this._send({ type: 'paddle_input', y, vy })) return false;
+
+    this._lastPaddleInputAt = now;
+    this._lastPaddleInput = { y, vy };
+    return true;
   }
 
-  // Send skill activation to opponent
   sendSkillAction(side) {
-    if (this.conn && this.conn.open) {
-      this.conn.send({
-        type: 'action_skill',
-        side: side
-      });
-    }
+    this._send({ type: 'action_skill', side });
   }
 
-  // Send laser activation to opponent
   sendLaserAction(side) {
-    if (this.conn && this.conn.open) {
-      this.conn.send({
-        type: 'action_laser',
-        side: side
-      });
-    }
+    this._send({ type: 'action_laser', side });
   }
 
   disconnect() {
     this.stopHostSync();
-    if (this.conn) this.conn.close();
-    if (this.peer) this.peer.destroy();
+    this._matchStarted = false;
     this.isOnline = false;
     this.isHost = false;
     this.game.isOnline = false;
+    this._resetPaddleInputState();
+    this._wsWaiters.splice(0);
+    if (this.conn) {
+      try { this.conn.close(); } catch (_) {}
+      this.conn = null;
+    }
+    if (this.peer) {
+      try { this.peer.destroy(); } catch (_) {}
+      this.peer = null;
+    }
+    if (this.ws) {
+      try { this.ws.close(); } catch (_) {}
+      this.ws = null;
+    }
+    this.transport = null;
   }
 }
 

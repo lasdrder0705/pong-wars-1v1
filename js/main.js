@@ -34,6 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const p2SkillBtn = document.getElementById('p2SkillBtn');
   const p1LaserBtn = document.getElementById('p1LaserBtn');
   const p2LaserBtn = document.getElementById('p2LaserBtn');
+  const p1SkillBtnText = document.getElementById('p1SkillBtnText');
+  const p2SkillBtnText = document.getElementById('p2SkillBtnText');
+  const p1LaserBtnText = document.getElementById('p1LaserBtnText');
+  const p2LaserBtnText = document.getElementById('p2LaserBtnText');
   const p1CDTag = document.getElementById('p1CDTag');
   const p2CDTag = document.getElementById('p2CDTag');
   const mobileControls = document.getElementById('mobileControls');
@@ -44,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const createRoomBtn = document.getElementById('createRoomBtn');
   const joinRoomBtn = document.getElementById('joinRoomBtn');
   const joinCodeInput = document.getElementById('joinCodeInput');
+  const lanHostInput = document.getElementById('lanHostInput');
+  const lanHostBtn = document.getElementById('lanHostBtn');
+  const lanHostRow = document.getElementById('lanHostRow');
   const roomCodeDisplay = document.getElementById('roomCodeDisplay');
   const myRoomCode = document.getElementById('myRoomCode');
   const copyCodeBtn = document.getElementById('copyCodeBtn');
@@ -72,19 +79,55 @@ document.addEventListener('DOMContentLoaded', () => {
   const timeLimitSelect = document.getElementById('timeLimitSelect');
   const gridSizeSelect = document.getElementById('gridSizeSelect');
 
+  function applyMobileLayout() {
+    if (!mobileControls) return;
+    // 显示/隐藏完全交给 CSS（body.is-mobile + data-layout），这里只设置布局标识
+    if (game.mode === 'sim') mobileControls.dataset.layout = 'sim';
+    else if (game.mode === 'pvp') mobileControls.dataset.layout = 'pvp';
+    else if (game.mode === 'lan') {
+      mobileControls.dataset.layout = game.playerSide === 'night' ? 'lan-night' : 'lan-day';
+    } else {
+      mobileControls.dataset.layout = 'pve';
+    }
+    if (p1SkillBtnText) p1SkillBtnText.textContent = game.mode === 'pvp' ? 'P1 普技 (E)' : '普技';
+    if (p1LaserBtnText) p1LaserBtnText.textContent = game.mode === 'pvp' ? 'P1 激光 (空格)' : '激光';
+    if (p2SkillBtnText) p2SkillBtnText.textContent = game.mode === 'pvp' ? 'P2 普技 (Shift)' : '普技';
+    if (p2LaserBtnText) p2LaserBtnText.textContent = game.mode === 'pvp' ? 'P2 激光 (回车)' : '激光';
+  }
+
+  async function loadLanHint() {
+    const hint = document.getElementById('lanHint');
+    if (!hint) return;
+    if (game.network.shouldUseSecureSameOriginRelay()) {
+      game.network.useSameOriginRelay();
+      if (lanHostRow) lanHostRow.hidden = true;
+      hint.textContent = `互联网联机已就绪：创建 4 位房间码发给朋友即可对战（优先加密中继，不可用时自动切换加密 P2P）。`;
+      return;
+    }
+    if (lanHostRow) lanHostRow.hidden = false;
+    try {
+      const res = await fetch('/api/info', { cache: 'no-store' });
+      if (!res.ok) throw new Error('no-api');
+      const info = await res.json();
+      hint.textContent = `电脑局域网地址：http://${info.ip}:${info.port}  （手机/APK 填 IP ${info.ip}）`;
+      if (lanHostInput && !lanHostInput.value) lanHostInput.value = info.ip;
+    } catch (_) {
+      hint.textContent = '未检测到局域网服务。电脑先运行 node server.js，APK/手机填电脑 IP 再点连接电脑。';
+    }
+  }
+
   // Side Announcement Display
   function showSideAnnouncement(side) {
     const isDay = side === 'day';
-    sideAnnouncementText.textContent = isDay 
-      ? '⚔️ 对决开始！你是【☀️ 昼方 · 左侧挡板】（曜石黑球）'
-      : '⚔️ 对决开始！你是【🌙 夜方 · 右侧挡板】（纯白光球）';
+    sideAnnouncementText.textContent = isDay
+      ? '对决开始！你是【昼方 · 左侧挡板】（曜石黑球）'
+      : '对决开始！你是【夜方 · 右侧挡板】（纯白光球）';
     sideAnnouncement.classList.add('show');
 
-    // Update HUD YOU tag
     if (dayYouTag) dayYouTag.classList.toggle('active', isDay);
     if (nightYouTag) nightYouTag.classList.toggle('active', !isDay);
+    applyMobileLayout();
 
-    // Haptic vibration on mobile
     if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
 
     setTimeout(() => {
@@ -95,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Network Callbacks
   game.network.onStatusChange = (status, msg) => {
     if (lanStatus) lanStatus.textContent = msg;
+    updateRuleControls();
     if (status === 'connected') {
       setTimeout(() => {
         lanModal.classList.remove('show');
@@ -103,8 +147,34 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   game.network.onSideAssigned = (side) => {
+    timeLimitSelect.value = String(game.timeLimit);
+    gridSizeSelect.value = String(game.squareSize);
+    themeSelect.value = game.currentThemeKey;
+    applyThemeCSS(game.currentThemeKey);
+    updateRuleControls();
     showSideAnnouncement(side);
   };
+
+  function rulesLocked() {
+    return game.mode === 'lan' && game.network.isOnline;
+  }
+
+  function updateRuleControls() {
+    const locked = rulesLocked();
+    timeLimitSelect.disabled = locked;
+    gridSizeSelect.disabled = locked;
+    themeSelect.disabled = locked;
+  }
+
+  function requestPauseToggle() {
+    const shouldPause = game.state !== 'paused';
+    if (game.mode === 'lan' && game.network.isOnline) {
+      game.network.requestPause(shouldPause);
+    } else {
+      game.setPaused(shouldPause);
+    }
+    updatePauseUI();
+  }
 
   // Aggressive Web Audio Autoplay Unlock
   const unlockAudio = () => {
@@ -127,26 +197,42 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Input Listeners
+  // Capture-phase: Space/Enter must not click a focused button (that was restarting the match).
   window.addEventListener('keydown', (e) => {
+    const tag = e.target && e.target.tagName;
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable);
+
+    if (!typing && (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter')) {
+      e.preventDefault();
+      if (tag === 'BUTTON' && e.target.blur) e.target.blur();
+    }
+
     unlockAudio();
     game.keys[e.code] = true;
+    if (e.key) game.keys[e.key] = true;
 
     if (e.code === 'KeyP' || e.code === 'Escape') {
-      game.pause();
-      updatePauseUI();
+      requestPauseToggle();
     } else if (e.code === 'KeyR') {
       if (game.mode !== 'lan') startNewGame();
     }
+  }, true);
+
+  document.querySelectorAll('button').forEach((btn) => {
+    btn.setAttribute('type', 'button');
+    btn.addEventListener('click', () => btn.blur());
   });
 
   window.addEventListener('keyup', (e) => {
     game.keys[e.code] = false;
+    if (e.key) game.keys[e.key] = false;
   });
 
   // Touch / Mobile virtual controls
   let isTouching = false;
   canvas.addEventListener('touchstart', (e) => {
     unlockAudio();
+    e.preventDefault();
     isTouching = true;
     handleTouchMove(e);
   }, { passive: false });
@@ -273,31 +359,36 @@ document.addEventListener('DOMContentLoaded', () => {
       modeButtons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const mode = btn.dataset.mode;
+      cancelCountdown();
       game.setMode(mode);
-      
+      syncGameActive();
+
       if (mode === 'lan') {
         lanModal.classList.add('show');
         simSpeedGroup.style.display = 'none';
         aiDiffGroup.style.display = 'none';
-        if (mobileControls) mobileControls.style.display = 'grid';
+        applyMobileLayout();
+        loadLanHint();
       } else if (mode === 'sim') {
         simSpeedGroup.style.display = 'flex';
         aiDiffGroup.style.display = 'none';
-        if (mobileControls) mobileControls.style.display = 'none';
+        applyMobileLayout();
         startNewGame();
       } else if (mode === 'pve') {
         simSpeedGroup.style.display = 'none';
         aiDiffGroup.style.display = 'flex';
-        if (mobileControls) mobileControls.style.display = 'grid';
         if (dayYouTag) dayYouTag.classList.add('active');
         if (nightYouTag) nightYouTag.classList.remove('active');
+        applyMobileLayout();
+        tryEnterGameFullscreen();
         startNewGame();
       } else {
         simSpeedGroup.style.display = 'none';
         aiDiffGroup.style.display = 'none';
-        if (mobileControls) mobileControls.style.display = 'grid';
         if (dayYouTag) dayYouTag.classList.remove('active');
         if (nightYouTag) nightYouTag.classList.remove('active');
+        applyMobileLayout();
+        tryEnterGameFullscreen();
         startNewGame();
       }
     });
@@ -313,6 +404,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (createRoomBtn) {
     createRoomBtn.addEventListener('click', () => {
       unlockAudio();
+      tryEnterGameFullscreen();
       createRoomBtn.disabled = true;
       lanStatus.textContent = '正在初始化房间...';
       game.network.createRoom(null, (err, code) => {
@@ -328,8 +420,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (joinRoomBtn) {
     joinRoomBtn.addEventListener('click', () => {
       unlockAudio();
+      tryEnterGameFullscreen();
       const code = joinCodeInput.value.trim();
-      if (!code || code.length !== 4) {
+      if (!/^\d{4}$/.test(code)) {
         lanStatus.textContent = '请输入正确的4位数字房间码！';
         return;
       }
@@ -341,13 +434,53 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (copyCodeBtn) {
-    copyCodeBtn.addEventListener('click', () => {
+    copyCodeBtn.addEventListener('click', async () => {
       const code = myRoomCode.textContent;
       if (code && code !== '----') {
-        navigator.clipboard.writeText(code).then(() => {
+        try {
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            throw new Error('clipboard-api-unavailable');
+          }
+          await navigator.clipboard.writeText(code);
           lanStatus.textContent = '房间码已复制到剪贴板！发给朋友即可对战。';
-        }).catch(() => {});
+        } catch (_) {
+          const input = document.createElement('textarea');
+          input.value = code;
+          input.setAttribute('readonly', '');
+          input.style.position = 'fixed';
+          input.style.opacity = '0';
+          document.body.appendChild(input);
+          input.select();
+          const copied = typeof document.execCommand === 'function' &&
+            document.execCommand('copy');
+          input.remove();
+          lanStatus.textContent = copied
+            ? '房间码已复制到剪贴板！发给朋友即可对战。'
+            : `无法自动复制，请手动复制房间码：${code}`;
+        }
       }
+    });
+  }
+
+  if (lanHostBtn) {
+    lanHostBtn.addEventListener('click', async () => {
+      unlockAudio();
+      const host = lanHostInput ? lanHostInput.value.trim() : '';
+      if (!host) {
+        lanStatus.textContent = '请输入电脑的局域网 IP。';
+        return;
+      }
+      if (!game.network.setRelayHost(host, 8080)) {
+        lanStatus.textContent = 'IP 格式不正确。';
+        return;
+      }
+      lanHostBtn.disabled = true;
+      lanStatus.textContent = `正在连接 ${host}:8080 …`;
+      const ok = await game.network._ensureWs();
+      lanHostBtn.disabled = false;
+      lanStatus.textContent = ok
+        ? `已连上电脑 ${host}。请创建或加入房间。`
+        : `连不上 ${host}:8080。请确认电脑已运行 node server.js，且手机与电脑同一 Wi-Fi。`;
     });
   }
 
@@ -358,23 +491,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Time Limit
   timeLimitSelect.addEventListener('change', (e) => {
-    game.timeLimit = parseInt(e.target.value, 10);
-    game.timeLeft = game.timeLimit;
+    if (rulesLocked()) {
+      e.target.value = String(game.timeLimit);
+      return;
+    }
+    game.setTimeLimit(parseInt(e.target.value, 10));
   });
 
   // Grid Size
   gridSizeSelect.addEventListener('change', (e) => {
+    if (rulesLocked()) {
+      e.target.value = String(game.squareSize);
+      return;
+    }
     const size = parseInt(e.target.value, 10);
-    game.squareSize = size;
-    game.gridX = Math.floor(game.width / size);
-    game.gridY = Math.floor(game.height / size);
-    game.physics = new PhysicsEngine(game.gridX, game.gridY, size);
-    game.totalSquares = game.gridX * game.gridY;
-    if (game.mode !== 'lan') startNewGame();
+    if (game.setGridSize(size) && game.mode !== 'lan') startNewGame();
   });
 
   // Theme
   themeSelect.addEventListener('change', (e) => {
+    if (rulesLocked()) {
+      e.target.value = game.currentThemeKey;
+      return;
+    }
     game.setTheme(e.target.value);
     applyThemeCSS(e.target.value);
   });
@@ -435,31 +574,202 @@ document.addEventListener('DOMContentLoaded', () => {
   // Pause UI
   function updatePauseUI() {
     pauseBtnText.textContent = game.state === 'paused' ? '继续 (P)' : '暂停 (P)';
+    syncGameActive();
   }
   pauseBtn.addEventListener('click', () => {
     unlockAudio();
-    game.pause();
-    updatePauseUI();
+    requestPauseToggle();
   });
 
   function startNewGame() {
     gameOverModal.classList.remove('show');
+    if (startOverlay) startOverlay.classList.remove('show');
     game.start();
     updatePauseUI();
     if (game.mode === 'pve') {
       if (dayYouTag) dayYouTag.classList.add('active');
       if (nightYouTag) nightYouTag.classList.remove('active');
     }
+    applyMobileLayout();
   }
 
-  restartBtn.addEventListener('click', () => {
+  function restartCurrentGame() {
     unlockAudio();
-    if (game.mode !== 'lan') startNewGame();
-  });
-  modalRestartBtn.addEventListener('click', () => {
-    unlockAudio();
-    if (game.mode !== 'lan') startNewGame();
-  });
+    if (game.mode === 'lan') {
+      // 联机模式：通知对方并双方同时重开
+      gameOverModal.classList.remove('show');
+      if (startOverlay) startOverlay.classList.remove('show');
+      tryEnterGameFullscreen();
+      if (game.network && typeof game.network.sendRestartGame === 'function') {
+        game.network.sendRestartGame();
+      } else {
+        startNewGame();
+      }
+      updatePauseUI();
+      applyMobileLayout();
+      return;
+    }
+    tryEnterGameFullscreen();
+    startNewGame();
+  }
+
+  restartBtn.addEventListener('click', restartCurrentGame);
+  modalRestartBtn.addEventListener('click', restartCurrentGame);
+
+  // ====== 开局倒计时 / 移动端全屏横屏 / 挡板控制区 ======
+  const startOverlay = document.getElementById('startOverlay');
+  const startGameBtn = document.getElementById('startGameBtn');
+  const countdownOverlay = document.getElementById('countdownOverlay');
+  const countdownText = document.getElementById('countdownText');
+  const paddleZone = document.getElementById('paddleZone');
+  const exitFsBtn = document.getElementById('exitFsBtn');
+
+  // ?mobiletest=1 可在桌面模拟移动端布局（调试用途）
+  const forceMobile = new URLSearchParams(location.search).has('mobiletest');
+  const isCoarsePointer = forceMobile || window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  document.body.classList.toggle('is-mobile', isCoarsePointer);
+
+  const landscapeMq = window.matchMedia('(orientation: landscape)');
+  function syncOrientationClass() {
+    document.body.classList.toggle('landscape-mode', landscapeMq.matches || forceMobile);
+  }
+  if (landscapeMq.addEventListener) landscapeMq.addEventListener('change', syncOrientationClass);
+  else if (landscapeMq.addListener) landscapeMq.addListener(syncOrientationClass);
+  window.addEventListener('resize', syncOrientationClass);
+  syncOrientationClass();
+
+  let countdownRunning = false;
+  let countdownToken = 0;
+
+  function syncGameActive() {
+    const active = isCoarsePointer && game.mode !== 'sim' &&
+      (game.state === 'running' || countdownRunning);
+    document.body.classList.toggle('game-active', active);
+  }
+
+  function runCountdown(done) {
+    const stepsText = ['3', '2', '1', '战'];
+    let idx = 0;
+    const myToken = ++countdownToken;
+    countdownOverlay.classList.add('show');
+    const tick = () => {
+      if (myToken !== countdownToken) return;
+      if (idx >= stepsText.length) {
+        countdownOverlay.classList.remove('show');
+        done();
+        return;
+      }
+      countdownText.textContent = stepsText[idx];
+      countdownText.classList.remove('pop');
+      void countdownText.offsetWidth; // 重启动画
+      countdownText.classList.add('pop');
+      idx++;
+      setTimeout(tick, idx >= stepsText.length ? 450 : 700);
+    };
+    tick();
+  }
+
+  function cancelCountdown() {
+    countdownToken++;
+    countdownRunning = false;
+    if (countdownOverlay) countdownOverlay.classList.remove('show');
+  }
+
+  // 包装 game.start：先重置棋盘，再 3-2-1 倒计时，最后进入 running
+  game.start = function () {
+    game.sound.init();
+    if (countdownRunning) return;
+    if (startOverlay) startOverlay.classList.remove('show');
+    if (gameOverModal) gameOverModal.classList.remove('show');
+    countdownRunning = true;
+    game.reset();
+    syncGameActive();
+    updatePauseUI();
+    runCountdown(() => {
+      game.state = 'running';
+      countdownRunning = false;
+      syncGameActive();
+      updatePauseUI();
+    });
+  };
+
+  async function tryEnterGameFullscreen() {
+    if (!isCoarsePointer) return;
+    try {
+      const el = document.documentElement;
+      const hasFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!hasFs) {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      }
+    } catch (_) {}
+    try {
+      if (screen.orientation && screen.orientation.lock) {
+        await screen.orientation.lock('landscape');
+      }
+    } catch (_) {}
+    syncFsClass();
+  }
+
+  function exitGameFullscreen() {
+    try {
+      const hasFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (hasFs) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }
+    } catch (_) {}
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+  }
+
+  function syncFsClass() {
+    document.body.classList.toggle('real-fs', !!(document.fullscreenElement || document.webkitFullscreenElement));
+  }
+  document.addEventListener('fullscreenchange', syncFsClass);
+  document.addEventListener('webkitfullscreenchange', syncFsClass);
+
+  if (exitFsBtn) {
+    exitFsBtn.addEventListener('click', () => {
+      unlockAudio();
+      exitGameFullscreen();
+      if (game.state === 'running') requestPauseToggle();
+    });
+  }
+
+  if (startGameBtn) {
+    startGameBtn.addEventListener('click', () => {
+      unlockAudio();
+      tryEnterGameFullscreen();
+      if (game.mode !== 'lan') startNewGame();
+    });
+  }
+
+  // 挡板控制区：按住「上 / 下」按钮移动挡板（映射为键盘 W / S，全模式通用）
+  const zoneUpBtn = document.getElementById('zoneUpBtn');
+  const zoneDownBtn = document.getElementById('zoneDownBtn');
+
+  function bindZoneHold(btn, keyCode) {
+    if (!btn) return;
+    const press = (e) => {
+      unlockAudio();
+      if (e && e.cancelable) e.preventDefault();
+      game.keys[keyCode] = true;
+      btn.classList.add('held');
+    };
+    const release = () => {
+      game.keys[keyCode] = false;
+      btn.classList.remove('held');
+    };
+    btn.addEventListener('touchstart', press, { passive: false });
+    btn.addEventListener('touchend', release);
+    btn.addEventListener('touchcancel', release);
+    btn.addEventListener('mousedown', press);
+    btn.addEventListener('mouseup', release);
+    btn.addEventListener('mouseleave', release);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+  bindZoneHold(zoneUpBtn, 'KeyW');
+  bindZoneHold(zoneDownBtn, 'KeyS');
 
   // Main UI update loop
   let lastFrameTime = performance.now();
@@ -470,6 +780,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     game.update(delta);
     game.draw();
+    updatePauseUI();
+    updateRuleControls();
 
     // Update HUD Numbers
     const dayPct = ((game.dayScore / game.totalSquares) * 100).toFixed(1);
@@ -483,7 +795,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Speed Ratio & Penetration HUD
     const speedRatio = (0.5 + Math.min(1.0, game.elapsedSeconds / 75.0) * 1.0).toFixed(1);
-    const penetration = speedRatio < 0.85 ? 1 : (speedRatio < 1.25 ? 2 : 3);
+    const penetration = speedRatio < 0.85 ? 1 : 2;
     speedTierBadge.textContent = `速度 ${speedRatio}x · 连破 ${penetration}格`;
 
     // Timer
@@ -536,6 +848,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Game Over Trigger
     if (game.state === 'gameover' && !gameOverModal.classList.contains('show')) {
       gameOverModal.classList.add('show');
+      document.body.classList.remove('game-active');
+      exitGameFullscreen();
       const dayWon = game.dayScore >= game.nightScore;
       winnerTitle.textContent = dayWon ? '昼方胜利 (Day Wins)' : '夜方胜利 (Night Wins)';
       winnerTitle.style.color = dayWon ? game.theme.dayAccent : game.theme.nightAccent;
@@ -545,8 +859,10 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(loop);
   }
 
-  // Initial Boot
+  // Initial Boot：只渲染静态棋盘背景，不自动开局（点击“开战”或切换模式后倒计时开始）
   applyThemeCSS('classic');
-  startNewGame();
+  applyMobileLayout();
+  game.reset();
+  window.game = game;
   requestAnimationFrame(loop);
 });

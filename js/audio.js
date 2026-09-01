@@ -1,5 +1,5 @@
 /**
- * Web Audio API procedural sound synthesizer for Pong Wars 1v1
+ * 昼夜领地对战 V1.0 Web Audio API procedural sound synthesizer
  */
 class SoundEngine {
   constructor() {

@@ -1,6 +1,8 @@
-# Pong Wars 1v1 - 昼夜领地争夺战 (1v1 Battle Edition)
+# 基于网格碰撞与领地争夺的双人实时对战游戏软件 V1.0
 
-> 复刻并升级自推特爆火的 **Pong Wars**（作者 @vnglst / 分享者 @denicmarko），加入了 **大招激光格挡与后方保护、反冲吸收充能、黑白专属小球、接球能量偷取与减速博弈、5格石化要塞道具、3行挡板对齐激光大招与纯矢量 SVG 现代界面**。
+简称：**昼夜领地对战**。
+
+本软件基于 Koen van Gilst 的开源作品 **Pong Wars**（MIT）进行独立扩展，新增双人挡板对战、局域网房间、技能与道具、Android 包装层和完整交互界面。第三方来源、版本及许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。软著申请应仅主张申请人独立完成的新增与改写部分，不应将上游或第三方组件申报为原创代码。
 
 ---
 
@@ -52,12 +54,58 @@
 
 ---
 
-## 🚀 本地运行
+## 🚀 本地运行 / 局域网联机
 
-在浏览器直接打开 `index.html` 或通过本地 HTTP 服务访问：
+电脑做主机（网页、手机浏览器、APK 都能连）：
 
 ```bash
-cd /Users/a00000/.gemini/antigravity/scratch/pong-wars-1v1
-python3 -m http.server 8080
+npm test
+node server.js
 ```
-浏览器访问：`http://localhost:8080`
+
+- 本机：`http://localhost:8080`
+- 手机浏览器：终端打印的 `http://192.168.x.x:8080`
+- **APK**：安装 `dist/pong-wars-1v1-debug.apk`，局域网联机里填电脑 IP，再创建/加入 4 位房间码
+
+空格是昼方激光大招，**R** 重开，**P** 暂停。
+
+## 🌍 公网域名部署
+
+项目支持由 Nginx 终止 HTTPS/WSS，再反向代理到仅监听 `127.0.0.1:8080` 的单实例 Node 服务。若原域名已有网站，推荐使用独立子域名，例如 `game.example.com`，避免与原站点路径冲突。
+
+生成仅含运行文件的服务器发布目录：
+
+```bash
+npm test
+npm run package:server
+npm run check:server-release
+```
+
+生产环境至少设置：
+
+```ini
+PORT=8080
+GAME_BIND_HOST=127.0.0.1
+GAME_PUBLIC_ORIGINS=https://game.example.com
+```
+
+完整 DNS、systemd、Nginx、证书、健康检查、验收和回滚步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。不要把整个仓库配置为 Web 静态目录；应部署 `dist/server-release/` 中的白名单运行包。
+
+## 📱 Android APK
+
+```bash
+cd android && ./gradlew assembleDebug
+```
+
+产物：`android/app/build/outputs/apk/debug/app-debug.apk`
+
+Android 应用使用受控的 `appassets.androidplatform.net` 本地资源域加载页面；为连接同一 Wi-Fi 内的电脑，仍保留局域网明文 `ws://` 能力。
+
+## 版本与申请材料
+
+- 软件全称：基于网格碰撞与领地争夺的双人实时对战游戏软件
+- 软件简称：昼夜领地对战
+- 版本号：V1.0
+- 开发语言：JavaScript、HTML5、CSS3、Java
+- 材料元数据：`copyright_docs/software_metadata.json`
+- 申请人、权利归属、发表状态与完成日期在未获得真实信息前保持空值，不使用占位内容冒充已确认事实。

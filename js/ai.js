@@ -1,5 +1,5 @@
 /**
- * AI Opponent Logic for Pong Wars 1v1
+ * 昼夜领地对战 V1.0 AI Opponent Logic
  */
 class AIController {
   constructor(difficulty = 'medium') {

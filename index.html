@@ -3,25 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Pong Wars 1v1 - 昼夜领地对决</title>
-  <meta name="description" content="基于经典 Pong Wars 演化的 1v1 实时领地争夺竞技游戏。支持局域网联机对战、双人同屏对战、智能 AI 挑战与原版禅意观战模式。" />
-  <link rel="stylesheet" href="style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%23FFC801'/><path d='M12 2a10 10 0 0 0 0 20 5 5 0 0 0 0-10 5 5 0 0 1 0-10z' fill='%23114C5A'/></svg>" />
+  <title>昼夜领地对战 V1.0</title>
+  <meta
+    name="description"
+    content="基于网格碰撞与领地争夺的双人实时对战游戏软件 V1.0，支持局域网联机、双人同屏、智能 AI 挑战与自动演化观战。"
+  />
+  <link rel="stylesheet" href="style.css?v=20260831h" />
   <!-- WebRTC P2P Signaling Broker -->
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="vendor/peerjs.min.js?v=20260831h"></script>
 </head>
 <body>
+
+  <!-- 八卦背景装饰 -->
+  <div class="bg-bagua" aria-hidden="true">
+    <div class="bg-bagua-inner">
+      <span class="bg-trigram" style="--a:0deg">☰</span>
+      <span class="bg-trigram" style="--a:45deg">☱</span>
+      <span class="bg-trigram" style="--a:90deg">☲</span>
+      <span class="bg-trigram" style="--a:135deg">☳</span>
+      <span class="bg-trigram" style="--a:180deg">☴</span>
+      <span class="bg-trigram" style="--a:225deg">☵</span>
+      <span class="bg-trigram" style="--a:270deg">☶</span>
+      <span class="bg-trigram" style="--a:315deg">☷</span>
+      <svg class="bg-taiji" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="47" fill="#F0E7D3"/>
+        <path d="M50 3 A47 47 0 0 1 50 97 A23.5 23.5 0 0 1 50 50 A23.5 23.5 0 0 0 50 3" fill="#141210"/>
+        <circle cx="50" cy="26.5" r="6" fill="#141210"/>
+        <circle cx="50" cy="73.5" r="6" fill="#F0E7D3"/>
+      </svg>
+    </div>
+  </div>
 
   <!-- App Header -->
   <header>
     <div class="logo-group">
       <svg class="svg-icon logo-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10" stroke="#FFC801" stroke-width="2" />
-        <path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 0-10 5 5 0 0 1 0-10z" fill="#D9E8E3" stroke="none" />
-        <circle cx="12" cy="7" r="2" fill="#114C5A" />
-        <circle cx="12" cy="17" r="2" fill="#D9E8E3" />
+        <circle cx="12" cy="12" r="10" stroke="#2B2620" stroke-width="2" />
+        <path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 0-10 5 5 0 0 1 0-10z" fill="#F0E7D3" stroke="none" />
+        <circle cx="12" cy="7" r="2" fill="#26221B" />
+        <circle cx="12" cy="17" r="2" fill="#F0E7D3" />
       </svg>
-      <h1>Pong Wars 1v1 <span class="header-sub">| 昼夜领地对战</span></h1>
+      <h1>昼夜领地对战 <span class="header-sub">| V1.0</span></h1>
     </div>
 
     <div class="header-controls">
@@ -113,8 +135,8 @@
       <div class="hud-top">
         <div class="team-hud" id="dayTeamHud">
           <div class="team-badge-icon day-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#FFC801" stroke-width="2">
-              <circle cx="12" cy="12" r="5" fill="#FFC801"></circle>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#57504A" stroke-width="2">
+              <circle cx="12" cy="12" r="5" fill="#57504A"></circle>
               <line x1="12" y1="1" x2="12" y2="3"></line>
               <line x1="12" y1="21" x2="12" y2="23"></line>
               <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
@@ -138,7 +160,7 @@
 
         <div class="team-hud" id="nightTeamHud" style="flex-direction: row-reverse; text-align: right;">
           <div class="team-badge-icon night-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="#7000FF" stroke="#A78BFA" stroke-width="1.5">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="#26221B" stroke="#57504A" stroke-width="1.5">
               <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
             </svg>
           </div>
@@ -181,6 +203,64 @@
     <!-- Canvas Area -->
     <div class="canvas-wrapper">
       <canvas id="pongCanvas" width="600" height="600"></canvas>
+
+      <!-- Start Overlay（进入网站时不自动开局） -->
+      <div class="start-overlay show" id="startOverlay">
+        <div class="bagua-mark">
+          <span class="trigram" style="--a:0deg">☰</span>
+          <span class="trigram" style="--a:45deg">☱</span>
+          <span class="trigram" style="--a:90deg">☲</span>
+          <span class="trigram" style="--a:135deg">☳</span>
+          <span class="trigram" style="--a:180deg">☴</span>
+          <span class="trigram" style="--a:225deg">☵</span>
+          <span class="trigram" style="--a:270deg">☶</span>
+          <span class="trigram" style="--a:315deg">☷</span>
+          <svg class="taiji-core" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="47" fill="#F0E7D3"/>
+            <path d="M50 3 A47 47 0 0 1 50 97 A23.5 23.5 0 0 1 50 50 A23.5 23.5 0 0 0 50 3" fill="#141210"/>
+            <circle cx="50" cy="26.5" r="6" fill="#141210"/>
+            <circle cx="50" cy="73.5" r="6" fill="#F0E7D3"/>
+          </svg>
+        </div>
+        <h2 class="start-title">昼夜领地对战</h2>
+        <p class="start-sub">太极分两仪 · 昼夜夺乾坤</p>
+        <button class="start-btn" id="startGameBtn">开 战</button>
+        <p class="start-hint">可在上方切换模式，默认人机对战</p>
+      </div>
+
+      <!-- Countdown Overlay -->
+      <div class="countdown-overlay" id="countdownOverlay">
+        <span class="countdown-num" id="countdownText">3</span>
+      </div>
+
+      <!-- 竖屏提示：移动端开局后请旋转横屏 -->
+      <div class="rotate-hint" id="rotateHint">
+        <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="2" width="10" height="20" rx="2" transform="rotate(90 12 12)"></rect>
+          <polyline points="8 9 5 12 8 15"></polyline>
+          <polyline points="16 9 19 12 16 15"></polyline>
+        </svg>
+        <span>请旋转手机 · 横屏开战</span>
+      </div>
+    </div>
+
+    <!-- 移动端横屏：左侧挡板控制区（按住上/下按钮移动挡板） -->
+    <div class="touch-zone" id="paddleZone" aria-hidden="true">
+      <button class="zone-btn" id="zoneUpBtn" type="button" aria-label="挡板上移">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 15 12 8 18 15"></polyline>
+        </svg>
+        <span>上</span>
+      </button>
+      <div class="zone-hint">
+        <span>挡板控制<br />按住移动</span>
+      </div>
+      <button class="zone-btn" id="zoneDownBtn" type="button" aria-label="挡板下移">
+        <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 16 18 9"></polyline>
+        </svg>
+        <span>下</span>
+      </button>
     </div>
 
     <!-- Mobile Virtual Action Buttons -->
@@ -242,7 +322,7 @@
           <option value="60">60 秒</option>
           <option value="90" selected>90 秒</option>
           <option value="120">120 秒</option>
-          <option value="0">无限 (至死方休)</option>
+          <option value="0">至死方休 (一方 90% 获胜)</option>
         </select>
       </div>
 
@@ -258,10 +338,10 @@
       <div class="setting-group">
         <label for="themeSelect">主题配色:</label>
         <select id="themeSelect">
-          <option value="classic" selected>经典昼夜 (Day & Night)</option>
-          <option value="cyberpunk">赛博霓虹 (Cyberpunk)</option>
-          <option value="elemental">冰火交锋 (Fire & Ice)</option>
-          <option value="void">曜金虚空 (Solar & Void)</option>
+          <option value="classic" selected>宣纸水墨 (Rice Paper)</option>
+          <option value="cyberpunk">浓墨重峦 (Heavy Ink)</option>
+          <option value="elemental">淡墨远山 (Light Ink)</option>
+          <option value="void">夜池墨影 (Night Pond)</option>
           <option value="monochrome">极简黑白 (Monochrome)</option>
         </select>
       </div>
@@ -290,11 +370,15 @@
   <div class="modal-overlay" id="lanModal">
     <div class="modal-card">
       <div class="modal-header-row">
-        <h2 class="modal-title">局域网 / 跨设备对战</h2>
+        <h2 class="modal-title">局域网 / 互联网双人对战</h2>
         <button class="close-modal-btn" id="closeLanModalBtn">&times;</button>
       </div>
-      <p class="modal-sub">同一 Wi-Fi 下用房间码秒连。开局随机昼方（左）或夜方（右），并在屏幕上标明你控制哪一侧。</p>
+      <p class="modal-sub">通过当前网站可直接创建或加入 4 位房间；使用 APK 或自建局域网服务时，也可以填写电脑 IP。开局随机昼/夜，并标明你控制哪一侧。</p>
       <p id="lanHint" class="lan-status-msg">正在检测局域网地址…</p>
+      <div class="lan-host-row" id="lanHostRow">
+        <input type="text" id="lanHostInput" class="code-input" placeholder="电脑 IP，例如 192.168.3.212" autocomplete="off" />
+        <button type="button" class="btn-primary" id="lanHostBtn">连接电脑</button>
+      </div>
 
       <div class="lan-options-grid">
         <div class="lan-card">
@@ -334,27 +418,33 @@
         <h2 class="modal-title">玩法与机制说明</h2>
         <button class="close-modal-btn" id="closeHelpModalIconBtn">&times;</button>
       </div>
-      <p class="modal-sub">手机可单指拖拽挡板；联机开局随机分配阵营，并用横幅、YOU 标记告诉你自己在哪一侧。</p>
+      <p class="modal-sub">手机点按或滑动屏幕，挡板会瞬移到指尖高度；联机开局随机分配阵营，并用横幅、YOU 标记告诉你自己在哪一侧。</p>
 
       <div class="guide-section">
         <h4 class="guide-title">控制与操作方式</h4>
         <div class="guide-row">
           <span>手机 / 平板</span>
-          <span>在棋盘上<strong>单指上下拖动</strong>控制己方挡板</span>
+          <span>在棋盘或左侧控制区<strong>点按 / 上下滑动</strong>，挡板瞬移到指尖高度</span>
         </div>
         <div class="guide-row">
           <span>键盘 · 昼方（左）</span>
-          <span><span class="key-badge">W</span>/<span class="key-badge">S</span> 移动，<span class="key-badge">E</span> 耀斑，<span class="key-badge">Space</span> 激光</span>
+          <span>
+            <span class="key-badge">W</span>/<span class="key-badge">S</span> 移动，
+            <span class="key-badge">E</span> 耀斑，<span class="key-badge">Space</span> 激光
+          </span>
         </div>
         <div class="guide-row">
           <span>键盘 · 夜方（右）</span>
-          <span><span class="key-badge">↑</span>/<span class="key-badge">↓</span> 移动，<span class="key-badge">Shift</span> 月蚀，<span class="key-badge">Enter</span> 激光</span>
+          <span>
+            <span class="key-badge">↑</span>/<span class="key-badge">↓</span> 移动，
+            <span class="key-badge">Shift</span> 月蚀，<span class="key-badge">Enter</span> 激光
+          </span>
         </div>
       </div>
 
       <div class="guide-section">
         <h4 class="guide-title">核心战术机制</h4>
-        <p>• <strong>身份识别</strong>：开局大横幅提示您的阵营，HUD 战况栏常驻 <code>[YOU]</code> 徽章，己方挡板旁带有黄色发光指示箭头。</p>
+        <p>• <strong>身份识别</strong>：开局横幅提示阵营，顶部战况栏你的一侧会显示 YOU 标记。</p>
         <p>• <strong>大招激光格挡与反充</strong>：敌方激光命中我方挡板时被阻断，保护后方方块不被转化，同时我方吸收回复 <strong>+30% 大招充能</strong>！</p>
         <p>• <strong>接球能量偷取与减速</strong>：接球偷取敌方 4% 能量、充能己方 6% 并减速敌球 25%（速度越慢连破格数越少）。</p>
         <p>• <strong>5 格石化要塞道具</strong>：在敌方领地生成 5 格 2 层石化护甲领地，低速需击打 2 次，高速 1 击破除但消耗当次穿透动能。</p>
@@ -382,20 +472,25 @@
     </div>
   </div>
 
+  <!-- 移动端全屏退出按钮 -->
+  <button class="exit-fs-btn" id="exitFsBtn" title="退出全屏" aria-label="退出全屏">✕</button>
+
   <!-- Footer -->
   <footer>
     <p>
-      致敬原创 <strong>Pong Wars</strong> by <a href="https://koenvangilst.nl/labs/pong-wars" target="_blank">Koen van Gilst</a> & <a href="https://x.com/denicmarko" target="_blank">Marko Denic</a> | 1v1 LAN Battle Edition
+      基于 <strong>Pong Wars</strong> 改进，原作：
+      <a href="https://koenvangilst.nl/labs/pong-wars" target="_blank" rel="noopener noreferrer">Koen van Gilst</a>；
+      联机组件：PeerJS。第三方组件按各自开源许可使用。
     </p>
   </footer>
 
   <!-- Scripts -->
-  <script src="js/audio.js"></script>
-  <script src="js/particles.js"></script>
-  <script src="js/physics.js"></script>
-  <script src="js/ai.js"></script>
-  <script src="js/network.js"></script>
-  <script src="js/game.js"></script>
-  <script src="js/main.js"></script>
+  <script src="js/audio.js?v=20260831h"></script>
+  <script src="js/particles.js?v=20260831h"></script>
+  <script src="js/physics.js?v=20260831h"></script>
+  <script src="js/ai.js?v=20260831h"></script>
+  <script src="js/network.js?v=20260831h"></script>
+  <script src="js/game.js?v=20260831h"></script>
+  <script src="js/main.js?v=20260831h"></script>
 </body>
 </html>

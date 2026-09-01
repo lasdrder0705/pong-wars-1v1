@@ -1,0 +1,42 @@
+[Unit]
+Description=Day Night Territory Battle Web Game
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pongwars
+Group=pongwars
+WorkingDirectory=/srv/day-night-territory-battle
+EnvironmentFile=/etc/day-night-territory-battle.env
+
+ExecStartPre=/usr/bin/node --check /srv/day-night-territory-battle/server.js
+ExecStart=/usr/bin/node /srv/day-night-territory-battle/server.js
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGTERM
+LimitNOFILE=65536
+TasksMax=64
+MemoryMax=512M
+UMask=027
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 /**
- * Physics and Collision Engine for Pong Wars 1v1
+ * 昼夜领地对战 V1.0 Physics and Collision Engine
  */
 class PhysicsEngine {
   constructor(gridWidth, gridHeight, squareSize) {
@@ -57,8 +57,8 @@ class PhysicsEngine {
 
           // Case A: Enemy has petrified / fortified this block!
           if (stone && stone.owner !== ball.team) {
-            // High speed mode (penetrationCapacity >= 3): 1-hit shatter stone but consume all penetration for this bounce
-            if (ball.penetrationCapacity >= 3) {
+            // High speed mode (极速档 atMaxSpeed): 1-hit shatter stone but consume all penetration for this bounce
+            if (ball.atMaxSpeed === true) {
               stoneGrid[i][j] = null;
               squares[i][j] = ball.reverseColor;
               flippedCount++;
@@ -188,15 +188,15 @@ class PhysicsEngine {
           enemyPaddle.energy = Math.max(0, enemyPaddle.energy - 4.0);
         }
 
-        // Slow down ball speed by 25% (down to minimum 4.0)
+        // Slow down ball speed by 25% (down to minimum 0.5x base speed)
         const currentSpeed = Math.hypot(ball.dx, ball.dy);
-        const newSpeed = Math.max(4.0, currentSpeed * 0.75);
+        const newSpeed = Math.max(3.2, currentSpeed * 0.75);
 
         ball.dx = (isLeftPaddle ? 1 : -1) * Math.cos(angle) * newSpeed;
         ball.dy = Math.sin(angle) * newSpeed + (paddle.vy || 0) * 0.2;
 
-        const speedRatio = newSpeed / 8.0;
-        ball.penetrationCapacity = speedRatio < 0.85 ? 1 : (speedRatio < 1.25 ? 2 : 3);
+        const speedRatio = newSpeed / 6.4;
+        ball.penetrationCapacity = speedRatio < 0.85 ? 1 : 2;
         ball.remainingPenetration = ball.penetrationCapacity;
       } else {
         // Own ball: Normal deflect at current speed
@@ -212,7 +212,7 @@ class PhysicsEngine {
   }
 
   // Small random perturbation
-  applyRandomness(ball, minSpeed = 3, maxSpeed = 14) {
+  applyRandomness(ball, minSpeed = 2.4, maxSpeed = 11.2) {
     ball.dx += (Math.random() * 0.03 - 0.015);
     ball.dy += (Math.random() * 0.03 - 0.015);
 
@@ -227,8 +227,8 @@ class PhysicsEngine {
       ball.dy *= factor;
     }
 
-    if (Math.abs(ball.dx) < 1.2) ball.dx = ball.dx >= 0 ? 1.5 : -1.5;
-    if (Math.abs(ball.dy) < 1.2) ball.dy = ball.dy >= 0 ? 1.5 : -1.5;
+    if (Math.abs(ball.dx) < 0.96) ball.dx = ball.dx >= 0 ? 1.2 : -1.2;
+    if (Math.abs(ball.dy) < 0.96) ball.dy = ball.dy >= 0 ? 1.2 : -1.2;
   }
 }
 

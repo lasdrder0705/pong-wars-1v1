@@ -4,54 +4,54 @@
 
 const THEMES = {
   classic: {
-    name: '经典昼夜 (Day & Night)',
-    dayColor: '#D9E8E3',
-    dayBall: '#141414', // Obsidian Black
-    dayAccent: '#2A9D8F',
-    nightColor: '#114C5A',
-    nightBall: '#FFFFFF', // Pure Crystal White
-    nightAccent: '#E76F51',
-    bg: 'linear-gradient(135deg, #172B36 0%, #0F1D24 100%)'
+    name: '宣纸水墨 (Rice Paper)',
+    dayColor: '#FAF7F0',
+    dayBall: '#141414', // 墨珠
+    dayAccent: '#1C1812',
+    nightColor: '#16130F',
+    nightBall: '#FFFFFF', // 白丸
+    nightAccent: '#8A8175',
+    bg: 'linear-gradient(160deg, #F9F5EA 0%, #EDE6D4 100%)'
   },
   cyberpunk: {
-    name: '赛博霓虹 (Cyberpunk)',
-    dayColor: '#00F0FF',
-    dayBall: '#141414',
-    dayAccent: '#00F0FF',
-    nightColor: '#1A0B2E',
+    name: '浓墨重峦 (Heavy Ink)',
+    dayColor: '#F5F1E6',
+    dayBall: '#0D0D0D',
+    dayAccent: '#100E0A',
+    nightColor: '#0D0B08',
     nightBall: '#FFFFFF',
-    nightAccent: '#FF007F',
-    bg: 'linear-gradient(135deg, #090214 0%, #1a0826 100%)'
+    nightAccent: '#6E675C',
+    bg: 'linear-gradient(160deg, #F3EEE0 0%, #E3DAC3 100%)'
   },
   elemental: {
-    name: '冰火交锋 (Fire & Ice)',
-    dayColor: '#FFE5B4',
-    dayBall: '#141414',
-    dayAccent: '#F77F00',
-    nightColor: '#1D3557',
+    name: '淡墨远山 (Light Ink)',
+    dayColor: '#F6F4EE',
+    dayBall: '#1A1A1A',
+    dayAccent: '#454138',
+    nightColor: '#454138',
     nightBall: '#FFFFFF',
-    nightAccent: '#A8DADC',
-    bg: 'linear-gradient(135deg, #0b1726 0%, #201115 100%)'
+    nightAccent: '#A39C8D',
+    bg: 'linear-gradient(160deg, #FAF8F2 0%, #ECEAE2 100%)'
   },
   void: {
-    name: '曜金虚空 (Solar & Void)',
-    dayColor: '#FFF3B0',
-    dayBall: '#141414',
-    dayAccent: '#FFD700',
-    nightColor: '#331832',
+    name: '夜池墨影 (Night Pond)',
+    dayColor: '#E8E4D8',
+    dayBall: '#0F0F0F',
+    dayAccent: '#1E1B15',
+    nightColor: '#100E0A',
     nightBall: '#FFFFFF',
-    nightAccent: '#9E2A2B',
-    bg: 'linear-gradient(135deg, #180c18 0%, #29121a 100%)'
+    nightAccent: '#5C564C',
+    bg: 'linear-gradient(160deg, #24201A 0%, #12100C 100%)'
   },
   monochrome: {
     name: '极简黑白 (Monochrome)',
-    dayColor: '#F5F5F7',
-    dayBall: '#141414',
-    dayAccent: '#86868B',
-    nightColor: '#1D1D1F',
+    dayColor: '#FBFBFD',
+    dayBall: '#0E0E10',
+    dayAccent: '#2E2E30',
+    nightColor: '#141416',
     nightBall: '#FFFFFF',
-    nightAccent: '#E5E5EA',
-    bg: 'linear-gradient(135deg, #111112 0%, #222225 100%)'
+    nightAccent: '#86868B',
+    bg: 'linear-gradient(160deg, #FCFCFC 0%, #EAEAEC 100%)'
   }
 };
 
@@ -61,6 +61,102 @@ const ALLOWED_GRID_SIZES = new Set([20, 25, 30]);
 const ALLOWED_TIME_LIMITS = new Set([0, 60, 90, 120]);
 const FIXED_STEP_MS = 1000 / 60;
 const MAX_FRAME_DELTA_MS = 250;
+
+// ===== 水墨球头 Sprite 缓存（纯视觉：墨团/光晕预渲染，逐帧复用） =====
+function _gmHexToRgb(hex) {
+  if (typeof hex !== 'string') return null;
+  const m = hex.replace('#', '');
+  if (m.length !== 6) return null;
+  const v = parseInt(m, 16);
+  return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+}
+
+function _gmSeededRand(seed) {
+  let h = seed >>> 0;
+  return function () {
+    h = (h * 1664525 + 1013904223) >>> 0;
+    return h / 4294967296;
+  };
+}
+
+const _gmBallSpriteCache = {};
+const _GM_BALL_SPRITE_SIZE = 192;
+const _GM_BALL_CORE_R = 56; // 球半径在 sprite 中占据的像素半径
+
+// isInk=true：浓墨墨团（边缘不规则晕染+颗粒）；isInk=false：发光白丸（亮核+柔光晕）
+// 返回 { canvas, scale }，绘制边长 = ball.radius * 2 * scale
+function _gmGetBallSprite(color, isInk) {
+  const key = (isInk ? 'ink|' : 'glow|') + color;
+  let entry = _gmBallSpriteCache[key];
+  if (entry) return entry;
+
+  const S = _GM_BALL_SPRITE_SIZE;
+  const C = S / 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = S;
+  canvas.height = S;
+  const c = canvas.getContext('2d');
+  const rgb = _gmHexToRgb(color) || (isInk ? { r: 20, g: 20, b: 20 } : { r: 255, g: 255, b: 255 });
+  const rgba = (a) => `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`;
+  let seed = 13;
+  for (let i = 0; i < key.length; i++) seed = (seed * 31 + key.charCodeAt(i)) >>> 0;
+  const rand = _gmSeededRand(seed);
+
+  if (isInk) {
+    // 外围偏移墨晕（2 层），让边缘不再是矢量正圆
+    for (let k = 0; k < 2; k++) {
+      const ox = C + (rand() - 0.5) * _GM_BALL_CORE_R * 0.5;
+      const oy = C + (rand() - 0.5) * _GM_BALL_CORE_R * 0.5;
+      const or = _GM_BALL_CORE_R * (0.75 + rand() * 0.2);
+      const g = c.createRadialGradient(ox, oy, 0, ox, oy, or);
+      g.addColorStop(0, rgba(0.8));
+      g.addColorStop(0.6, rgba(0.5));
+      g.addColorStop(1, rgba(0));
+      c.fillStyle = g;
+      c.fillRect(0, 0, S, S);
+    }
+    // 主墨团：中心浓重饱满，向外晕开
+    const g = c.createRadialGradient(C, C, 0, C, C, _GM_BALL_CORE_R);
+    g.addColorStop(0, rgba(1));
+    g.addColorStop(0.62, rgba(0.97));
+    g.addColorStop(0.85, rgba(0.5));
+    g.addColorStop(1, rgba(0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+    // 边缘颗粒飞白
+    for (let k = 0; k < 10; k++) {
+      const ang = rand() * Math.PI * 2;
+      const d = _GM_BALL_CORE_R * (0.82 + rand() * 0.35);
+      c.globalAlpha = 0.15 + rand() * 0.3;
+      c.fillStyle = color;
+      c.beginPath();
+      c.arc(C + Math.cos(ang) * d, C + Math.sin(ang) * d, 1 + rand() * 2.2, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = 1;
+    }
+  } else {
+    // 外圈柔和辉光
+    let g = c.createRadialGradient(C, C, 0, C, C, C - 2);
+    g.addColorStop(0, rgba(0.45));
+    g.addColorStop(0.45, rgba(0.22));
+    g.addColorStop(0.75, rgba(0.07));
+    g.addColorStop(1, rgba(0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+    // 亮核：纯白中心，边缘轻微柔化
+    g = c.createRadialGradient(C, C, 0, C, C, _GM_BALL_CORE_R);
+    g.addColorStop(0, rgba(1));
+    g.addColorStop(0.72, rgba(1));
+    g.addColorStop(0.92, rgba(0.85));
+    g.addColorStop(1, rgba(0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, S, S);
+  }
+
+  entry = { canvas: canvas, scale: C / _GM_BALL_CORE_R };
+  _gmBallSpriteCache[key] = entry;
+  return entry;
+}
 
 class PongWarsGame {
   constructor(canvas, options = {}) {
@@ -120,6 +216,10 @@ class PongWarsGame {
     this.keys = {};
     this.simSpeed = 1.0;
     this.simulationAccumulator = 0;
+
+    // 纯视觉缓存：领地水墨纹理离屏层（增量重绘，不影响格子数据结构）
+    this._terrLayer = null;
+    this._terrColors = null;
   }
 
   createPaddle(x, isLeft) {
@@ -278,6 +378,7 @@ class PongWarsGame {
 
   // Normal Skill: Solar Flare
   activateSolarFlare(isRemote = false) {
+    if (this.state !== 'running' && !isRemote) return;
     if (this.isOnline && !this.isHost && !isRemote) {
       if (this.p1SkillCD > 0) return;
       this.p1SkillCD = 250;
@@ -321,12 +422,13 @@ class PongWarsGame {
       }
     }
 
-    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#FFD700', 65);
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, this.theme.dayAccent, 65);
     this.calculateTerritory();
   }
 
   // Normal Skill: Eclipse
   activateEclipse(isRemote = false) {
+    if (this.state !== 'running' && !isRemote) return;
     if (this.isOnline && !this.isHost && !isRemote) {
       if (this.p2SkillCD > 0) return;
       this.p2SkillCD = 250;
@@ -370,12 +472,13 @@ class PongWarsGame {
       }
     }
 
-    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, '#7000FF', 65);
+    this.particles.addShockwave(target.i * this.squareSize + this.squareSize / 2, target.j * this.squareSize + this.squareSize / 2, this.theme.nightAccent, 65);
     this.calculateTerritory();
   }
 
   // Ultimate Skill: 3-Row Laser Beam with Paddle Shielding & Energy Absorption
   activateLaser(isLeft = true, isRemote = false) {
+    if (this.state !== 'running' && !isRemote) return;
     const caster = isLeft ? this.leftPaddle : this.rightPaddle;
     const defender = isLeft ? this.rightPaddle : this.leftPaddle;
     if (caster.energy < 100) return;
@@ -388,7 +491,7 @@ class PongWarsGame {
 
     caster.energy = 0;
     const targetColor = isLeft ? this.theme.dayColor : this.theme.nightColor;
-    const beamColor = isLeft ? (this.theme.dayAccent || '#FFD700') : (this.theme.nightAccent || '#7000FF');
+    const beamColor = isLeft ? (this.theme.dayAccent || '#2B2620') : (this.theme.nightAccent || '#8A8175');
 
     let centerRow = Math.floor(caster.y / this.squareSize);
     centerRow = Math.max(1, Math.min(this.gridY - 2, centerRow));
@@ -414,7 +517,7 @@ class PongWarsGame {
 
       this.sound.playShieldAbsorb();
       this.particles.shake(5, 2);
-      this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#7000FF') : (this.theme.dayAccent || '#FFD700'), 25);
+      this.particles.addEnergyShield(defender.x, defender.y, defender.height, isLeft ? (this.theme.nightAccent || '#8A8175') : (this.theme.dayAccent || '#2B2620'), 25);
     } else {
       this.sound.playLaser(isLeft);
       this.particles.shake(6, 2.5);
@@ -531,7 +634,8 @@ class PongWarsGame {
           penetrationCapacity: ball.penetrationCapacity,
           remainingPenetration: 1,
           isExtra: true,
-          lifetime: 500
+          // 分裂球持续 6 秒：60 步/秒 × 3 子步 × 6 秒 = 1080
+          lifetime: 1080
         });
       }
     } else if (powerup.type === 'freeze') {
@@ -573,7 +677,7 @@ class PongWarsGame {
       }
 
       myPaddle.y = Math.max(myPaddle.height / 2, Math.min(this.height - myPaddle.height / 2, myPaddle.y));
-      this.network.sendPaddleInput(myPaddle.y, myPaddle.vy);
+      if (!this.isHost) this.network.sendPaddleInput(myPaddle.y, myPaddle.vy);
       return;
     }
 
@@ -627,8 +731,18 @@ class PongWarsGame {
       : 0;
 
     if (this.isOnline && !this.isHost) {
-      this.handleInput();
-      this.particles.update();
+      this.simulationAccumulator += frameDelta;
+      let inputSteps = 0;
+      while (this.simulationAccumulator + 0.000001 >= FIXED_STEP_MS &&
+             inputSteps < 15 && this.state === 'running') {
+        this.handleInput();
+        this.particles.update();
+        this.simulationAccumulator = Math.max(
+          0,
+          this.simulationAccumulator - FIXED_STEP_MS
+        );
+        inputSteps++;
+      }
       return;
     }
 
@@ -707,7 +821,10 @@ class PongWarsGame {
         }
 
         const ballSpeedRatio = (Math.hypot(ball.dx, ball.dy) / BASE_BALL_SPEED);
-        ball.penetrationCapacity = ballSpeedRatio < 0.85 ? 1 : (ballSpeedRatio < 1.25 ? 2 : 3);
+        // 连破数：低速 1 格，其余 2 格（极速从 3 格下调为 2 格）
+        ball.penetrationCapacity = ballSpeedRatio < 0.85 ? 1 : 2;
+        // 极速档（≥1.25x）标记：用于高速特效与石化一击碎
+        ball.atMaxSpeed = ballSpeedRatio >= 1.25;
 
         const stepDx = (ball.dx / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
         const stepDy = (ball.dy / steps) * (this.mode === 'sim' ? this.simSpeed : 1.0);
@@ -716,7 +833,9 @@ class PongWarsGame {
         ball.y += stepDy;
 
         if (s === 0) {
-          this.particles.addBallTrail(ball.x, ball.y, ball.ballColor, ball.radius, ball.penetrationCapacity >= 3);
+          // 拖尾颜色取自当前主题（黑球=dayBall 墨色，白球=nightBall 色系），纯视觉参数
+          const trailColor = ball.team === 'day' ? this.theme.dayBall : this.theme.nightBall;
+          this.particles.addBallTrail(ball.x, ball.y, trailColor, ball.radius, ball.atMaxSpeed === true);
         }
 
         this.physics.checkSquareCollision(
@@ -757,16 +876,16 @@ class PongWarsGame {
             this.dayCombo = 0;
             this.sound.playPaddleHit(false);
             this.particles.addShockwave(paddle.x, paddle.y, this.theme.dayColor, 35);
-            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#FFD700', 8);
-            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, this.theme.dayAccent, 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#8A8175');
           });
 
           this.physics.checkPaddleCollision(ball, this.rightPaddle, this.leftPaddle, false, (paddle, enemyPaddle, b) => {
             this.nightCombo = 0;
             this.sound.playPaddleHit(false);
             this.particles.addShockwave(paddle.x, paddle.y, this.theme.nightColor, 35);
-            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, '#7000FF', 8);
-            this.particles.addSlowdownRing(b.x, b.y, '#00E5FF');
+            this.particles.addEnergySiphon(b.x, b.y, paddle.x, paddle.y, this.theme.nightAccent, 8);
+            this.particles.addSlowdownRing(b.x, b.y, '#8A8175');
           });
         }
 
@@ -829,6 +948,130 @@ class PongWarsGame {
     ctx.closePath();
   }
 
+  // ===== 领地水墨纹理层（纯视觉增量缓存：只改绘制方式，不改 squares 数据结构） =====
+  _terrRand(i, j, k) {
+    let h = ((i * 73856093) ^ (j * 19349663) ^ (k * 83492791)) >>> 0;
+    h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
+    h = (h ^ (h >>> 16)) >>> 0;
+    return h / 4294967296;
+  }
+
+  _renderTerrCell(ctx, i, j) {
+    const s = this.squareSize;
+    const x = i * s;
+    const y = j * s;
+    const color = this.squares[i][j];
+
+    ctx.globalAlpha = 1;
+    ctx.clearRect(x, y, s, s);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, s, s);
+
+    if (color === this.theme.nightColor) {
+      // 黑夜领地：大尺度平滑墨色晕染（跨格连续浓淡，非平涂死黑）
+      const nx = x / this.width;
+      const ny = y / this.height;
+      let v = Math.sin(nx * 9.3 + 1.7) * Math.cos(ny * 7.1 + 0.6) * 0.5
+            + Math.sin((nx + ny) * 5.2 + 3.1) * 0.35
+            + Math.cos(nx * 3.7 - ny * 6.4) * 0.15;
+      v *= 0.85 + this._terrRand(i, j, 0) * 0.3; // 轻微逐格抖动防色带
+      if (v > 0) {
+        ctx.fillStyle = `rgba(232, 224, 208, ${(v * 0.1).toFixed(3)})`;
+      } else {
+        ctx.fillStyle = `rgba(0, 0, 0, ${(-v * 0.17).toFixed(3)})`;
+      }
+      ctx.fillRect(x, y, s, s);
+      // 叠加一格内极淡的径向墨团，增加宣纸吸墨的局部质感
+      const rx = x + this._terrRand(i, j, 2) * s;
+      const ry = y + this._terrRand(i, j, 3) * s;
+      const rr = s * (0.5 + this._terrRand(i, j, 4) * 0.5);
+      const g = ctx.createRadialGradient(rx, ry, 0, rx, ry, rr);
+      const lightBlob = this._terrRand(i, j, 5) > 0.5;
+      g.addColorStop(0, lightBlob ? 'rgba(232, 224, 208, 0.05)' : 'rgba(0, 0, 0, 0.08)');
+      g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, s, s);
+    } else {
+      // 白昼领地：宣纸纤维细纹
+      ctx.strokeStyle = 'rgba(140, 132, 118, 0.05)';
+      ctx.lineWidth = 1;
+      for (let k = 0; k < 2; k++) {
+        const rx = x + this._terrRand(i, j, k * 2) * s;
+        const ry = y + this._terrRand(i, j, k * 2 + 1) * s;
+        const ang = this._terrRand(i, j, 10 + k) * Math.PI;
+        const len = s * (0.35 + this._terrRand(i, j, 20 + k) * 0.45);
+        ctx.beginPath();
+        ctx.moveTo(rx - Math.cos(ang) * len / 2, ry - Math.sin(ang) * len / 2);
+        ctx.lineTo(rx + Math.cos(ang) * len / 2, ry + Math.sin(ang) * len / 2);
+        ctx.stroke();
+      }
+    }
+
+    // 交界晕染：与异色格相邻的边上叠不规则小墨点，让边界更有机
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (let n = 0; n < 4; n++) {
+      const ni = i + dirs[n][0];
+      const nj = j + dirs[n][1];
+      if (ni < 0 || nj < 0 || ni >= this.gridX || nj >= this.gridY) continue;
+      if (this.squares[ni][nj] === color) continue;
+      for (let k = 0; k < 3; k++) {
+        const t = this._terrRand(i, j, 30 + n * 3 + k);
+        const wob = (this._terrRand(i, j, 60 + n * 3 + k) - 0.5) * 3.5;
+        let ex, ey;
+        if (dirs[n][0] !== 0) {
+          ex = x + (dirs[n][0] > 0 ? s - 1.5 : 1.5) + wob * dirs[n][0];
+          ey = y + t * s;
+        } else {
+          ex = x + t * s;
+          ey = y + (dirs[n][1] > 0 ? s - 1.5 : 1.5) + wob * dirs[n][1];
+        }
+        const rr = 1.8 + this._terrRand(i, j, 50 + n * 3 + k) * 3.2;
+        ctx.globalAlpha = 0.18 + this._terrRand(i, j, 70 + n * 3 + k) * 0.2;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(ex, ey, rr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  _syncTerritoryLayer() {
+    if (!this._terrLayer || this._terrLayer.width !== this.width || this._terrLayer.height !== this.height) {
+      this._terrLayer = document.createElement('canvas');
+      this._terrLayer.width = this.width;
+      this._terrLayer.height = this.height;
+      this._terrColors = null;
+    }
+    const ctx = this._terrLayer.getContext('2d');
+
+    if (!this._terrColors) {
+      this._terrColors = [];
+      for (let i = 0; i < this.gridX; i++) {
+        this._terrColors[i] = new Array(this.gridY);
+        for (let j = 0; j < this.gridY; j++) {
+          this._renderTerrCell(ctx, i, j);
+          this._terrColors[i][j] = this.squares[i][j];
+        }
+      }
+      return;
+    }
+
+    // 增量重绘：仅颜色发生变化的格子（及其邻居的交界晕染）
+    for (let i = 0; i < this.gridX; i++) {
+      for (let j = 0; j < this.gridY; j++) {
+        if (this.squares[i][j] !== this._terrColors[i][j]) {
+          this._terrColors[i][j] = this.squares[i][j];
+          this._renderTerrCell(ctx, i, j);
+          if (i + 1 < this.gridX) this._renderTerrCell(ctx, i + 1, j);
+          if (i - 1 >= 0) this._renderTerrCell(ctx, i - 1, j);
+          if (j + 1 < this.gridY) this._renderTerrCell(ctx, i, j + 1);
+          if (j - 1 >= 0) this._renderTerrCell(ctx, i, j - 1);
+        }
+      }
+    }
+  }
+
   draw() {
     this.ctx.save();
     
@@ -838,26 +1081,27 @@ class PongWarsGame {
 
     this.ctx.clearRect(0, 0, this.width, this.height);
 
-    // 1. Draw Grid Squares
+    // 1. Draw Grid Squares（水墨宣纸/晕染领地：离屏纹理层一次性贴上）
+    this._syncTerritoryLayer();
+    this.ctx.drawImage(this._terrLayer, 0, 0);
+
+    // Stones overlay
     for (let i = 0; i < this.gridX; i++) {
       for (let j = 0; j < this.gridY; j++) {
-        this.ctx.fillStyle = this.squares[i][j];
-        this.ctx.fillRect(i * this.squareSize, j * this.squareSize, this.squareSize, this.squareSize);
-
         const stone = this.stoneGrid[i] ? this.stoneGrid[i][j] : null;
         if (stone) {
           this.ctx.save();
-          this.ctx.strokeStyle = '#4A5568';
+          this.ctx.strokeStyle = '#55504A';
           this.ctx.lineWidth = 2.5;
           this.ctx.strokeRect(i * this.squareSize + 1.5, j * this.squareSize + 1.5, this.squareSize - 3, this.squareSize - 3);
 
-          this.ctx.fillStyle = '#4A5568';
+          this.ctx.fillStyle = '#55504A';
           this.ctx.beginPath();
           this.ctx.arc(i * this.squareSize + this.squareSize / 2, j * this.squareSize + this.squareSize / 2, 2.5, 0, Math.PI * 2);
           this.ctx.fill();
 
           if (stone.hp === 1) {
-            this.ctx.strokeStyle = '#E2E8F0';
+            this.ctx.strokeStyle = '#CFC8BA';
             this.ctx.lineWidth = 1.5;
             this.ctx.beginPath();
             this.ctx.moveTo(i * this.squareSize + 4, j * this.squareSize + 4);
@@ -897,10 +1141,10 @@ class PongWarsGame {
 
       this.ctx.beginPath();
       this.ctx.arc(0, 0, p.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = 'rgba(15, 25, 35, 0.9)';
+      this.ctx.fillStyle = 'rgba(26, 23, 18, 0.92)';
       this.ctx.fill();
       this.ctx.lineWidth = 2;
-      this.ctx.strokeStyle = p.type === 'petrify' ? '#A0AEC0' : '#FFD700';
+      this.ctx.strokeStyle = p.type === 'petrify' ? '#8C857A' : '#F0E7D3';
       this.ctx.stroke();
 
       this.ctx.strokeStyle = '#FFFFFF';
@@ -917,7 +1161,7 @@ class PongWarsGame {
         this.ctx.lineTo(-5, -3);
         this.ctx.closePath();
         this.ctx.stroke();
-        this.ctx.fillStyle = '#A0AEC0';
+        this.ctx.fillStyle = '#8C857A';
         this.ctx.fill();
       } else if (p.type === 'bomb') {
         this.ctx.beginPath();
@@ -963,14 +1207,14 @@ class PongWarsGame {
         this.ctx.save();
         
         if (p.frozenTimer > 0) {
-          this.ctx.shadowColor = '#00E5FF';
+          this.ctx.shadowColor = '#FFFFFF';
           this.ctx.shadowBlur = 12;
         } else if (p.energy >= 100) {
-          this.ctx.shadowColor = '#FFC801';
+          this.ctx.shadowColor = '#2B2620';
           this.ctx.shadowBlur = 18;
         }
 
-        this.ctx.fillStyle = p.frozenTimer > 0 ? '#00E5FF' : (p.isLeft ? this.theme.dayBall : this.theme.nightBall);
+        this.ctx.fillStyle = p.frozenTimer > 0 ? '#B8B2A4' : (p.isLeft ? this.theme.dayBall : this.theme.nightBall);
         
         const rx = p.x - p.width / 2;
         const ry = p.y - p.height / 2;
@@ -987,7 +1231,7 @@ class PongWarsGame {
           this.ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
           this.ctx.fill();
 
-          this.ctx.strokeStyle = 'rgba(255, 200, 1, 0.25)';
+          this.ctx.strokeStyle = 'rgba(138, 129, 117, 0.35)';
           this.ctx.setLineDash([4, 4]);
           this.ctx.lineWidth = 1;
           this.ctx.beginPath();
@@ -1004,36 +1248,38 @@ class PongWarsGame {
     // 4. Draw Lasers & Particles
     this.particles.draw(this.ctx, this.width);
 
-    // 5. Draw Distinct Black & White Balls
+    // 5. Draw Distinct Black & White Balls（水墨风：墨珠=不规则晕染墨团，白丸=发光球+柔光晕）
     this.balls.forEach(ball => {
-      this.ctx.save();
-      this.ctx.beginPath();
-      this.ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-
       const isDayBall = ball.team === 'day';
-      const actualBallColor = isDayBall ? '#141414' : '#FFFFFF';
+      const ballColor = isDayBall ? this.theme.dayBall : this.theme.nightBall;
+      const spr = _gmGetBallSprite(ballColor, isDayBall);
+      const drawSize = ball.radius * 2 * spr.scale;
 
-      if (ball.penetrationCapacity >= 3) {
-        this.ctx.shadowColor = isDayBall ? '#000000' : '#FFFFFF';
-        this.ctx.shadowBlur = 16;
-        this.ctx.strokeStyle = isDayBall ? '#4A5568' : '#00F0FF';
-        this.ctx.lineWidth = 2;
-        this.ctx.stroke();
+      this.ctx.save();
+      if (ball.atMaxSpeed === true) {
+        this.ctx.shadowColor = isDayBall ? 'rgba(0,0,0,0.85)' : ballColor;
+        this.ctx.shadowBlur = 18;
+      } else if (!isDayBall) {
+        // 白丸常态柔和辉光
+        this.ctx.shadowColor = 'rgba(255,255,255,0.55)';
+        this.ctx.shadowBlur = 14;
       } else {
-        this.ctx.shadowColor = 'rgba(0,0,0,0.4)';
-        this.ctx.shadowBlur = 6;
+        this.ctx.shadowColor = 'rgba(0,0,0,0.35)';
+        this.ctx.shadowBlur = 5;
       }
-
-      this.ctx.fillStyle = actualBallColor;
-      this.ctx.fill();
-      this.ctx.closePath();
-
-      this.ctx.beginPath();
-      this.ctx.arc(ball.x - ball.radius * 0.25, ball.y - ball.radius * 0.25, ball.radius * 0.25, 0, Math.PI * 2);
-      this.ctx.fillStyle = isDayBall ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)';
-      this.ctx.fill();
-
+      this.ctx.drawImage(spr.canvas, ball.x - drawSize / 2, ball.y - drawSize / 2, drawSize, drawSize);
       this.ctx.restore();
+
+      if (isDayBall) {
+        // 墨珠表面的宣纸反光小高光
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.26;
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.beginPath();
+        this.ctx.arc(ball.x - ball.radius * 0.28, ball.y - ball.radius * 0.3, ball.radius * 0.22, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.restore();
+      }
     });
 
     this.ctx.restore();
