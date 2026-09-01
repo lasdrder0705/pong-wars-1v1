@@ -771,6 +771,66 @@ document.addEventListener('DOMContentLoaded', () => {
   bindZoneHold(zoneUpBtn, 'KeyW');
   bindZoneHold(zoneDownBtn, 'KeyS');
 
+  // ====== 渲染自检与兜底（防止棋盘空白且无提示） ======
+  let renderErrorShown = false;
+  let lastBlankCheck = 0;
+
+  function showRenderError(msg) {
+    if (renderErrorShown) return;
+    renderErrorShown = true;
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;background:rgba(29,26,21,0.92);color:#F7F3EA;padding:10px 14px;border-radius:10px;font-size:12px;line-height:1.5;text-align:center;word-break:break-all;';
+    banner.textContent = '棋盘渲染异常（已自动兜底），请截图反馈此信息：' + msg;
+    document.body.appendChild(banner);
+  }
+
+  // 最简直绘：不依赖任何缓存层，保证领地/球至少可见
+  function fallbackDraw() {
+    const c = game.ctx;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, game.width, game.height);
+    for (let i = 0; i < game.gridX; i++) {
+      for (let j = 0; j < game.gridY; j++) {
+        c.fillStyle = game.squares[i][j];
+        c.fillRect(i * game.squareSize, j * game.squareSize, game.squareSize, game.squareSize);
+      }
+    }
+    game.balls.forEach(b => {
+      c.fillStyle = b.ballColor || '#141414';
+      c.beginPath();
+      c.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+      c.fill();
+    });
+    c.restore();
+  }
+
+  function renderSelfCheck(currentTime) {
+    if (currentTime - lastBlankCheck < 3000) return;
+    lastBlankCheck = currentTime;
+    try {
+      // 1) 遮罩覆盖检查：游戏运行中不应有遮罩盖住棋盘，发现即自动移除
+      if (game.state === 'running') {
+        const rect = game.canvas.getBoundingClientRect();
+        const cover = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const overlay = cover && cover.closest ? cover.closest('.start-overlay.show, .countdown-overlay.show') : null;
+        if (overlay) {
+          overlay.classList.remove('show');
+          console.warn('[render] 移除了遮挡棋盘的遮罩:', overlay.id);
+        }
+      }
+      // 2) 画布空白检查：中心点完全透明说明绘制失败，兜底直绘并提示
+      if (game.state !== 'gameover' && game.canvas.width > 0) {
+        const px = game.canvas.getContext('2d').getImageData(
+          Math.floor(game.canvas.width / 2), Math.floor(game.canvas.height / 2), 1, 1).data;
+        if (px[3] === 0) {
+          fallbackDraw();
+          showRenderError(`state=${game.state} canvas=${game.canvas.width}x${game.canvas.height} dpr=${window.devicePixelRatio} ua=${navigator.userAgent.slice(0, 90)}`);
+        }
+      }
+    } catch (_) {}
+  }
+
   // Main UI update loop
   let lastFrameTime = performance.now();
 
@@ -778,8 +838,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const delta = currentTime - lastFrameTime;
     lastFrameTime = currentTime;
 
-    game.update(delta);
-    game.draw();
+    try {
+      game.update(delta);
+      game.draw();
+    } catch (err) {
+      console.error('[render]', err);
+      try { fallbackDraw(); } catch (_) {}
+      showRenderError((err && err.message ? err.message : String(err)) + ` ua=${navigator.userAgent.slice(0, 90)}`);
+    }
+    renderSelfCheck(currentTime);
     updatePauseUI();
     updateRuleControls();
 
