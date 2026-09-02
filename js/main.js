@@ -3,7 +3,7 @@
  */
 
 // 构建标记：index.html 用来自检缓存版本是否一致
-window.__APP_BUILD__ = '20260902a';
+window.__APP_BUILD__ = '20260902b';
 
 document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('pongCanvas');
@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
     mode: 'pve',
     timeLimit: 90
   });
+  // 调试句柄：便于排查渲染/状态问题
+  window.__game = game;
 
   // DOM Elements
   const dayScoreEl = document.getElementById('dayScore');
@@ -681,7 +683,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 包装 game.start：先重置棋盘，再 3-2-1 倒计时，最后进入 running
   game.start = function () {
     game.sound.init();
-    if (countdownRunning) return;
+    // 倒计时进行中再次被调用（如倒计时内改网格/重开）：取消旧倒计时并重新开始，
+    // 绝不能直接 return——否则 setGridSize 改了维度而 reset() 没跑，棋盘数据失配崩溃
+    if (countdownRunning) cancelCountdown();
     if (startOverlay) startOverlay.classList.remove('show');
     if (gameOverModal) gameOverModal.classList.remove('show');
     countdownRunning = true;
@@ -794,8 +798,10 @@ document.addEventListener('DOMContentLoaded', () => {
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, game.width, game.height);
     for (let i = 0; i < game.gridX; i++) {
+      const row = game.squares[i];
+      if (!row) continue; // 防御：网格维度与数据瞬态失配时跳过缺失列
       for (let j = 0; j < game.gridY; j++) {
-        c.fillStyle = game.squares[i][j];
+        c.fillStyle = row[j];
         c.fillRect(i * game.squareSize, j * game.squareSize, game.squareSize, game.squareSize);
       }
     }
@@ -846,8 +852,10 @@ document.addEventListener('DOMContentLoaded', () => {
       game.draw();
     } catch (err) {
       console.error('[render]', err);
+      window.__lastRenderError = (err && (err.stack || err.message)) || String(err);
       try { fallbackDraw(); } catch (_) {}
-      showRenderError((err && err.message ? err.message : String(err)) + ` ua=${navigator.userAgent.slice(0, 90)}`);
+      const topFrame = err && err.stack ? String(err.stack).split('\n')[1] || '' : '';
+      showRenderError((err && err.message ? err.message : String(err)) + (topFrame ? ' @ ' + topFrame.trim().slice(0, 120) : '') + ` ua=${navigator.userAgent.slice(0, 90)}`);
     }
     renderSelfCheck(currentTime);
     updatePauseUI();

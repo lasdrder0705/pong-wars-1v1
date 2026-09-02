@@ -49,7 +49,7 @@ class PhysicsEngine {
       const i = Math.floor(checkX / this.squareSize);
       const j = Math.floor(checkY / this.squareSize);
 
-      if (i >= 0 && i < this.numSquaresX && j >= 0 && j < this.numSquaresY) {
+      if (i >= 0 && i < this.numSquaresX && j >= 0 && j < this.numSquaresY && squares[i]) {
         // If the square belongs to the enemy side
         if (squares[i][j] !== ball.reverseColor) {
           const oldColor = squares[i][j];
