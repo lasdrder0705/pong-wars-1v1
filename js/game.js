@@ -243,6 +243,11 @@ class PongWarsGame {
     this.gridY = Math.floor(this.height / size);
     this.physics = new PhysicsEngine(this.gridX, this.gridY, size);
     this.totalSquares = this.gridX * this.gridY;
+    // 立即重建格子数据：防止 start() 被倒计时吞掉后 gridX 与 squares 失配导致渲染崩溃
+    this.squares = this.physics.createGrid(this.theme.dayColor, this.theme.nightColor);
+    this.stoneGrid = this.physics.createStoneGrid();
+    this._terrColors = null; // 领地纹理层下一帧全量重建
+    this.calculateTerritory();
     return true;
   }
 
@@ -260,15 +265,19 @@ class PongWarsGame {
       const oldTheme = this.theme;
       this.theme = THEMES[themeKey];
 
-      for (let i = 0; i < this.gridX; i++) {
-        for (let j = 0; j < this.gridY; j++) {
-          if (this.squares[i] && this.squares[i][j] === oldTheme.dayColor) {
-            this.squares[i][j] = this.theme.dayColor;
-          } else if (this.squares[i] && this.squares[i][j] === oldTheme.nightColor) {
-            this.squares[i][j] = this.theme.nightColor;
+      // 按实际数据边界遍历（而非 gridX/gridY），维度瞬态失配时也不会漏转或越界
+      for (let i = 0; i < this.squares.length; i++) {
+        const row = this.squares[i];
+        if (!row) continue;
+        for (let j = 0; j < row.length; j++) {
+          if (row[j] === oldTheme.dayColor) {
+            row[j] = this.theme.dayColor;
+          } else if (row[j] === oldTheme.nightColor) {
+            row[j] = this.theme.nightColor;
           }
         }
       }
+      this._terrColors = null; // 领地纹理层全量换新主题
 
       this.balls.forEach(b => {
         if (b.team === 'day') {
@@ -367,9 +376,11 @@ class PongWarsGame {
     let day = 0;
     let night = 0;
     for (let i = 0; i < this.gridX; i++) {
+      const row = this.squares[i];
+      if (!row) continue; // 防御：维度瞬态失配时跳过缺失列
       for (let j = 0; j < this.gridY; j++) {
-        if (this.squares[i][j] === this.theme.dayColor) day++;
-        else if (this.squares[i][j] === this.theme.nightColor) night++;
+        if (row[j] === this.theme.dayColor) day++;
+        else if (row[j] === this.theme.nightColor) night++;
       }
     }
     this.dayScore = day;
@@ -960,7 +971,9 @@ class PongWarsGame {
     const s = this.squareSize;
     const x = i * s;
     const y = j * s;
-    const color = this.squares[i][j];
+    const rowData = this.squares[i];
+    if (!rowData) return; // 防御：维度瞬态失配时跳过缺失列
+    const color = rowData[j];
 
     ctx.globalAlpha = 1;
     ctx.clearRect(x, y, s, s);
@@ -1013,7 +1026,8 @@ class PongWarsGame {
       const ni = i + dirs[n][0];
       const nj = j + dirs[n][1];
       if (ni < 0 || nj < 0 || ni >= this.gridX || nj >= this.gridY) continue;
-      if (this.squares[ni][nj] === color) continue;
+      const nRow = this.squares[ni];
+      if (!nRow || nRow[nj] === color) continue;
       for (let k = 0; k < 3; k++) {
         const t = this._terrRand(i, j, 30 + n * 3 + k);
         const wob = (this._terrRand(i, j, 60 + n * 3 + k) - 0.5) * 3.5;
@@ -1049,9 +1063,10 @@ class PongWarsGame {
       this._terrColors = [];
       for (let i = 0; i < this.gridX; i++) {
         this._terrColors[i] = new Array(this.gridY);
+        const row = this.squares[i];
         for (let j = 0; j < this.gridY; j++) {
           this._renderTerrCell(ctx, i, j);
-          this._terrColors[i][j] = this.squares[i][j];
+          this._terrColors[i][j] = row ? row[j] : undefined;
         }
       }
       return;
@@ -1059,9 +1074,12 @@ class PongWarsGame {
 
     // 增量重绘：仅颜色发生变化的格子（及其邻居的交界晕染）
     for (let i = 0; i < this.gridX; i++) {
+      const row = this.squares[i];
+      if (!row) continue; // 防御：维度瞬态失配时跳过缺失列
+      if (!this._terrColors[i]) this._terrColors[i] = new Array(this.gridY);
       for (let j = 0; j < this.gridY; j++) {
-        if (this.squares[i][j] !== this._terrColors[i][j]) {
-          this._terrColors[i][j] = this.squares[i][j];
+        if (row[j] !== this._terrColors[i][j]) {
+          this._terrColors[i][j] = row[j];
           this._renderTerrCell(ctx, i, j);
           if (i + 1 < this.gridX) this._renderTerrCell(ctx, i + 1, j);
           if (i - 1 >= 0) this._renderTerrCell(ctx, i - 1, j);
